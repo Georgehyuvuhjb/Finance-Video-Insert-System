@@ -85,6 +85,19 @@ pip install -r requirements.txt
 
 ```
 
+## Font Setup for Chinese Character Support
+
+If you're running this application in an environment without Chinese fonts or without admin privileges, follow these steps to set up the required fonts.
+
+### Downloading Chinese Fonts
+
+This project includes scripts to help you download and set up Chinese fonts without admin privileges:
+
+1. Run the font downloader script:
+   ```bash
+   python download_chinese_fonts.py
+
+
 **Azure Speech Service API (for text to speech)**
 
 - **Set environment variables** `SPEECH_KEY` and `ENDPOINT` (Azure Speech Service) 
@@ -538,6 +551,8 @@ python main.py auto-caption -- \
 - `--no-gpu`: Disable GPU acceleration
 - `--workers`: Number of worker threads (default: 4)
 - `--quality`: Output quality - "normal", "high" (default: "high")
+- `--no-auto-wrap`: Disable automatic text wrapping (enabled by default)
+- `--max-lines`: Maximum number of lines for wrapped text (default: 3)
 
 #### Method 2: FFmpeg-based (Alternative for systems with FFmpeg GPU support)
 
