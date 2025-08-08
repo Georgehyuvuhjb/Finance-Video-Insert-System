@@ -429,11 +429,13 @@ class PyTorchVideoComposer:
         
         # Create a mapping from transcript text to video group
         text_to_video_map = {}
-        for video in videos:
+        for i, video in enumerate(videos):
             sentences = video["sentence_group"]["sentences"]
             for sentence in sentences:
                 # Use cleaned sentence text as key
                 cleaned_sentence = sentence.strip()
+                # Add segment ID for tracking playback position across batches
+                video["segment_id"] = f"segment_{i}"
                 text_to_video_map[cleaned_sentence] = video
         
         # Match each transcript entry to the correct video based on text content
@@ -447,7 +449,8 @@ class PyTorchVideoComposer:
             if matching_video:
                 matched_segments.append({
                     "transcript": transcript_entry,
-                    "video": matching_video
+                    "video": matching_video,
+                    "id": matching_video["segment_id"]  # Add ID for tracking
                 })
                 print(f"Matched transcript: '{transcript_text[:30]}...' -> Video {matching_video['video_id']}")
             else:
@@ -465,7 +468,8 @@ class PyTorchVideoComposer:
                 if best_match:
                     matched_segments.append({
                         "transcript": transcript_entry,
-                        "video": best_match
+                        "video": best_match,
+                        "id": best_match["segment_id"]  # Add ID for tracking
                     })
                     print(f"Fuzzy matched transcript: '{transcript_text[:30]}...' -> Video {best_match['video_id']}")
                 else:
@@ -477,7 +481,7 @@ class PyTorchVideoComposer:
     def compose_video(self, input_video, matched_segments):
         """
         Compose final video by inserting segments at the right times using PyTorch
-        with memory optimization through batch processing
+        with memory optimization through batch processing and continuity between batches
         """
         try:
             # Open main video with batch processing
@@ -511,6 +515,7 @@ class PyTorchVideoComposer:
                     continue
                 
                 frame_segments.append({
+                    "segment_id": match["id"],  # Add unique identifier
                     "start_frame": start_frame,
                     "end_frame": end_frame,
                     "video_data": video_data
@@ -525,6 +530,9 @@ class PyTorchVideoComposer:
             
             if not out.isOpened():
                 raise ValueError(f"Could not open output video file: {self.output_file}")
+            
+            # Maintain overlay video state between batches
+            active_overlays = {}  # Map segment_id to (cap, frame_position, target_size, position)
             
             # Process the main video in batches
             current_frame = 0
@@ -563,6 +571,7 @@ class PyTorchVideoComposer:
                     
                     # Apply overlays for each overlapping segment
                     for segment in overlapping_segments:
+                        segment_id = segment["segment_id"]
                         segment_start = max(segment["start_frame"], current_frame)
                         segment_end = min(segment["end_frame"], batch_end)
                         
@@ -576,7 +585,6 @@ class PyTorchVideoComposer:
                         # Get the relevant portion of main batch
                         main_portion = main_batch[batch_start_idx:batch_end_idx]
                         
-                        # Process overlay video
                         try:
                             video_data = segment["video_data"]
                             overlay_path = video_data["local_path"]
@@ -584,51 +592,86 @@ class PyTorchVideoComposer:
                             # Calculate frames needed from overlay
                             overlay_frames_needed = batch_end_idx - batch_start_idx
                             
-                            # Open overlay video
-                            overlay_cap = cv2.VideoCapture(overlay_path)
-                            overlay_width = int(overlay_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            overlay_height = int(overlay_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            
-                            # Calculate target size
-                            target_width, target_height = self.parse_size(
-                                self.size, main_width, main_height,
-                                overlay_width, overlay_height
-                            )
-                            
-                            # Make dimensions even
-                            target_width = target_width + (target_width % 2)
-                            target_height = target_height + (target_height % 2)
-                            
-                            # Calculate position
-                            position = self.parse_position(
-                                self.position, main_width, main_height,
-                                target_width, target_height
-                            )
+                            # Check if we have an active overlay for this segment
+                            if segment_id in active_overlays:
+                                # Continue from previous batch
+                                overlay_cap, frame_position, target_size, position = active_overlays[segment_id]
+                                
+                                # Verify the cap is still valid, if not reopen it
+                                if not overlay_cap.isOpened():
+                                    overlay_cap = cv2.VideoCapture(overlay_path)
+                                    overlay_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
+                            else:
+                                # First time seeing this segment, initialize overlay video
+                                overlay_cap = cv2.VideoCapture(overlay_path)
+                                
+                                if not overlay_cap.isOpened():
+                                    print(f"Could not open overlay video: {overlay_path}")
+                                    continue
+                                
+                                # Get overlay video dimensions
+                                overlay_width = int(overlay_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                overlay_height = int(overlay_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                                
+                                # Calculate target size
+                                target_size = self.parse_size(
+                                    self.size, main_width, main_height,
+                                    overlay_width, overlay_height
+                                )
+                                
+                                # Make dimensions even
+                                target_width = target_size[0] + (target_size[0] % 2)
+                                target_height = target_size[1] + (target_size[1] % 2)
+                                target_size = (target_width, target_height)
+                                
+                                # Calculate position
+                                position = self.parse_position(
+                                    self.position, main_width, main_height,
+                                    target_width, target_height
+                                )
+                                
+                                frame_position = 0
                             
                             # Read overlay frames
                             overlay_frames = []
+                            frames_read = 0
+                            total_frames = int(overlay_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                            
                             for _ in range(overlay_frames_needed):
                                 ret, frame = overlay_cap.read()
+                                frames_read += 1
+                                
                                 if not ret:
                                     # If we run out of frames, loop back to beginning
-                                    overlay_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                                    overlay_cap.release()
+                                    overlay_cap = cv2.VideoCapture(overlay_path)
+                                    frame_position = 0
                                     ret, frame = overlay_cap.read()
                                     if not ret:
                                         break
                                 
-                                # Resize frame
-                                frame = cv2.resize(frame, (target_width, target_height))
+                                # Resize frame to target size
+                                frame = cv2.resize(frame, target_size)
                                 
                                 # Convert to tensor
                                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                                 frame_tensor = self.processor.transform(Image.fromarray(frame))
                                 overlay_frames.append(frame_tensor)
                             
-                            overlay_cap.release()
+                            # Update frame position for next batch
+                            if frames_read < total_frames:
+                                # Only update if we haven't looped
+                                frame_position += frames_read
+                            else:
+                                # If we looped, calculate correct position
+                                frame_position = frames_read % total_frames
+                            
+                            # Store state for next batch
+                            active_overlays[segment_id] = (overlay_cap, frame_position, target_size, position)
                             
                             if overlay_frames:
                                 # Stack frames into tensor
-                                overlay_tensor = torch.stack(overlay_frames).to(self.processor.device)  # Fixed: use processor.device
+                                overlay_tensor = torch.stack(overlay_frames).to(self.processor.device)
                                 
                                 # Apply overlay
                                 main_portion = self.processor.overlay_batch(
@@ -637,16 +680,34 @@ class PyTorchVideoComposer:
                                 
                                 # Update main batch with overlaid portion
                                 main_batch[batch_start_idx:batch_end_idx] = main_portion
-                            
-                            # Free memory
-                            del overlay_frames
-                            torch.cuda.empty_cache()
-                            gc.collect()
+                                
+                                # Free memory
+                                del overlay_frames, overlay_tensor
+                                torch.cuda.empty_cache()
                             
                         except Exception as e:
                             print(f"Error processing overlay: {e}")
                             import traceback
-                            traceback.print_exc()  # Added to see detailed error
+                            traceback.print_exc()
+                    
+                    # Check if any segments are completely processed
+                    segments_to_remove = []
+                    for segment_id, (cap, _, _, _) in active_overlays.items():
+                        # Find the segment data
+                        segment_data = None
+                        for seg in frame_segments:
+                            if seg["segment_id"] == segment_id:
+                                segment_data = seg
+                                break
+                        
+                        # Check if segment is fully processed
+                        if segment_data and segment_data["end_frame"] <= batch_end:
+                            segments_to_remove.append(segment_id)
+                            cap.release()  # Release the video capture
+                    
+                    # Remove completed segments
+                    for segment_id in segments_to_remove:
+                        del active_overlays[segment_id]
                     
                     # Move segments that are completely processed
                     while (current_segment_idx < len(frame_segments) and 
@@ -665,9 +726,13 @@ class PyTorchVideoComposer:
                     torch.cuda.empty_cache()
                     gc.collect()
             
-            # Close files
+            # Close files and release resources
             main_cap.release()
             out.release()
+            
+            # Clean up any remaining active overlays
+            for segment_id, (cap, _, _, _) in active_overlays.items():
+                cap.release()
             
             # Add audio if specified
             if self.audio_file and os.path.exists(self.audio_file):
