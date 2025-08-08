@@ -4,14 +4,12 @@ OpenCV GPU-Accelerated Caption Generator
 ========================================
 
 High-performance subtitle generator using OpenCV with GPU acceleration.
-Optimized for HPC environments with A800 GPUs and large memory.
-
 Features:
 - GPU-accelerated video processing
 - High-quality Chinese text rendering using PIL
+- Automatic text wrapping for large fonts
+- Multi-line subtitle support
 - Batch processing for memory efficiency
-- Multi-threading support
-- Automatic fallback to CPU if GPU unavailable
 """
 
 import cv2
@@ -50,7 +48,9 @@ class GPUVideoProcessor:
                  use_gpu: bool = True,
                  num_workers: int = 4,
                  quality: str = "high",
-                 codec: str = "auto"):
+                 codec: str = "auto",
+                 auto_wrap: bool = True,
+                 max_lines: int = 3):
         
         self.input_video = input_video
         self.output_video = output_video
@@ -66,6 +66,8 @@ class GPUVideoProcessor:
         self.num_workers = num_workers
         self.quality = quality
         self.codec = codec
+        self.auto_wrap = auto_wrap
+        self.max_lines = max_lines
         
         # Video properties
         self.cap = None
@@ -111,8 +113,8 @@ class GPUVideoProcessor:
         # Use the verified working font paths from test results
         working_font_paths = [
             "/home/22055747d/.local/share/fonts/wqy-microhei.ttc",  # User's font directory
-            "fonts/wqy-microhei.ttc",                              # Local fonts directory
-            "./fonts/wqy-microhei.ttc",                            # Explicit relative path
+            "fonts/wqy-microhei.ttc",                               # Local fonts directory
+            "./fonts/wqy-microhei.ttc",                             # Explicit relative path
             os.path.expanduser("~/.local/share/fonts/wqy-microhei.ttc")  # Expanded path
         ]
         
@@ -134,7 +136,7 @@ class GPUVideoProcessor:
                     font_found = True
                     print(f"Using font: {font_path}")
                     # Test Chinese rendering capability
-                    test_text = "測試中文"
+                    test_text = "Test Chinese Text"
                     bbox = self.font.getbbox(test_text)
                     if bbox[2] - bbox[0] > 0:
                         print("Font supports Chinese characters ✓")
@@ -278,45 +280,110 @@ class GPUVideoProcessor:
             self.writer.release()
         cv2.destroyAllWindows()
     
-    def wrap_text(self, text: str, max_width_chars: int) -> List[str]:
+    def wrap_text(self, text: str, max_width_chars: int = None) -> List[str]:
         """
-        Wrap text to multiple lines based on character count
+        Smart text wrapping based on actual rendered width rather than character count
         
         Args:
             text: Input text
-            max_width_chars: Maximum characters per line
+            max_width_chars: Optional character-based width limit (fallback)
             
         Returns:
             List of text lines
         """
-        if len(text) <= max_width_chars:
-            return [text]
+        # If no text or font, return empty list
+        if not text or not self.font:
+            return []
         
-        lines = []
+        # Get video frame width (with margin for safety)
+        max_pixel_width = self.frame_width * 0.85 if hasattr(self, 'frame_width') else None
+        
+        # If we don't have frame width or font, fall back to character-based wrapping
+        if not max_pixel_width or not self.font or not self.auto_wrap:
+            # Fall back to basic character-based wrapping
+            if max_width_chars is None:
+                max_width_chars = self.max_width  # Use default from class
+            
+            if len(text) <= max_width_chars:
+                return [text]
+            
+            words = text.split()
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + (" " if current_line else "") + word
+                if len(test_line) <= max_width_chars:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                        current_line = word
+                    else:
+                        # Single word longer than max width, force break
+                        lines.append(word[:max_width_chars])
+                        current_line = word[max_width_chars:]
+            
+            if current_line:
+                lines.append(current_line)
+            
+            return lines
+        
+        # Smart pixel-based wrapping
         words = text.split()
+        if not words:
+            return []
+                
+        lines = []
         current_line = ""
+        current_width = 0
+        
+        # For CJK text, we might need to split individual characters
+        # since words may not be separated by spaces
+        is_cjk_text = any(u'\u4e00' <= c <= u'\u9fff' for c in text)
+        
+        if is_cjk_text and not " " in text:
+            # Treat each character as a "word" for CJK text without spaces
+            words = list(text)
         
         for word in words:
             test_line = current_line + (" " if current_line else "") + word
-            if len(test_line) <= max_width_chars:
+            test_bbox = self.font.getbbox(test_line)
+            test_width = test_bbox[2] - test_bbox[0]
+            
+            if test_width <= max_pixel_width:
                 current_line = test_line
+                current_width = test_width
             else:
                 if current_line:
                     lines.append(current_line)
                     current_line = word
+                    current_width = self.font.getbbox(word)[2] - self.font.getbbox(word)[0]
                 else:
-                    # Single word longer than max width, force break
-                    lines.append(word[:max_width_chars])
-                    current_line = word[max_width_chars:]
-        
-        if current_line:
+                    # Single word wider than max width - need to split characters
+                    lines.append(word)
+                    current_line = ""
+                    current_width = 0
+                    
+                # Enforce maximum number of lines
+                if len(lines) >= self.max_lines:
+                    # If we're at the max lines, add ellipsis to the last line
+                    if current_line and lines:
+                        lines[-1] = lines[-1] + "..."
+                    break
+            
+        if current_line and len(lines) < self.max_lines:
             lines.append(current_line)
         
+        # Remove debug info - it was causing too many messages
+        # if len(lines) > 1:
+        #     print(f"Wrapped text into {len(lines)} lines due to large font size")
+        
         return lines
-    
+
     def render_subtitle_to_image(self, text_lines: List[str]) -> Optional[np.ndarray]:
         """
-        Render subtitle text to an image using PIL
+        Render subtitle text to an image with automatic size adjustment
         
         Args:
             text_lines: List of text lines to render
@@ -331,7 +398,17 @@ class GPUVideoProcessor:
         padding = 20
         line_height = int(self.font_size * self.line_spacing)
         
-        # Create PIL image for text rendering
+        # Check if we need to rewrap text based on pixel width
+        if len(text_lines) == 1 and self.auto_wrap and hasattr(self, 'frame_width'):
+            # Get the text width in pixels for the single line
+            bbox = self.font.getbbox(text_lines[0])
+            text_width = bbox[2] - bbox[0]
+            
+            # If it exceeds frame width, rewrap using pixel-based wrapping
+            if text_width > (self.frame_width * 0.85):
+                text_lines = self.wrap_text(text_lines[0])
+        
+        # Calculate dimensions for the subtitle image
         max_text_width = 0
         for line in text_lines:
             bbox = self.font.getbbox(line)
@@ -380,7 +457,7 @@ class GPUVideoProcessor:
     
     def overlay_subtitle_on_frame(self, frame: np.ndarray, subtitle_img: np.ndarray) -> np.ndarray:
         """
-        Overlay subtitle image on video frame
+        Overlay subtitle image on video frame with auto-scaling if needed
         
         Args:
             frame: Video frame (BGR)
@@ -394,6 +471,21 @@ class GPUVideoProcessor:
         
         frame_h, frame_w = frame.shape[:2]
         sub_h, sub_w = subtitle_img.shape[:2]
+        
+        # Scale subtitle if wider than frame
+        scale_factor = 1.0
+        if sub_w > frame_w:
+            print(f"Warning: Subtitle width ({sub_w}px) exceeds frame width ({frame_w}px). Auto-scaling.")
+            scale_factor = frame_w / sub_w
+            new_width = frame_w
+            new_height = int(sub_h * scale_factor)
+            
+            # Resize subtitle image
+            subtitle_img = cv2.resize(subtitle_img, (new_width, new_height), 
+                                    interpolation=cv2.INTER_AREA)
+            
+            # Update dimensions
+            sub_h, sub_w = subtitle_img.shape[:2]
         
         # Calculate position
         if self.position == "bottom":
@@ -433,7 +525,7 @@ class GPUVideoProcessor:
     
     def process_frame_batch(self, start_frame: int, end_frame: int) -> List[np.ndarray]:
         """
-        Process a batch of frames
+        Process a batch of frames with smart text wrapping
         
         Args:
             start_frame: Starting frame number
@@ -464,7 +556,9 @@ class GPUVideoProcessor:
             if active_segments:
                 # Combine all active subtitle texts
                 all_text = " ".join([seg.text for seg in active_segments])
-                text_lines = self.wrap_text(all_text, self.max_width)
+                
+                # Use smart wrapping based on actual font metrics
+                text_lines = self.wrap_text(all_text)
                 
                 # Render subtitle
                 subtitle_img = self.render_subtitle_to_image(text_lines)
@@ -527,15 +621,15 @@ class GPUVideoProcessor:
             print(f"Error during processing: {e}")
             raise
         finally:
-            # 確保視頻文件完全關閉
+            # Ensure video files are closed
             self.close_video()
             
-        # 在視頻文件關閉後，再嘗試添加音頻
+        # Try to add audio after video file is closed
         try:
-            # 驗證生成的視頻文件是否有效
+            # Verify generated video file
             print("Verifying generated video file...")
             import time as time_module
-            time_module.sleep(1)  # 等待文件系統同步
+            time_module.sleep(1)  # Wait for filesystem sync
             
             if not os.path.exists(self.output_video):
                 raise FileNotFoundError(f"Output video file not found: {self.output_video}")
@@ -543,7 +637,7 @@ class GPUVideoProcessor:
             file_size = os.path.getsize(self.output_video)
             print(f"Video file size: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)")
             
-            if file_size < 1000:  # 如果文件太小，可能有問題
+            if file_size < 1000:  # If file is too small, there might be a problem
                 raise ValueError(f"Generated video file seems too small: {file_size} bytes")
             
             # Try to add audio back to the video
@@ -666,58 +760,10 @@ class GPUVideoProcessor:
             print(f"Error converting to MP4 with audio: {e}")
             print("Keeping AVI format without audio")
 
-    def convert_to_mp4(self):
-        """Try to convert AVI to MP4 using FFmpeg if available (Legacy method)"""
-        try:
-            import subprocess
-            
-            # Check if FFmpeg is available
-            result = subprocess.run(['ffmpeg', '-version'], 
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode != 0:
-                print("FFmpeg not available, keeping AVI format")
-                return
-            
-            # Create MP4 filename
-            mp4_output = self.output_video.replace('.avi', '.mp4')
-            
-            print(f"Converting to MP4 format: {mp4_output}")
-            
-            # FFmpeg conversion command
-            cmd = [
-                'ffmpeg', '-y', '-i', self.output_video,
-                '-c:v', 'libx264', '-crf', '23',
-                '-preset', 'fast',
-                '-c:a', 'copy',  # Copy audio if present
-                mp4_output
-            ]
-            
-            # Run conversion
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            
-            if result.returncode == 0:
-                print(f"Successfully converted to MP4: {mp4_output}")
-                # Update output path
-                self.output_video = mp4_output
-                # Optionally remove AVI file
-                try:
-                    import os
-                    os.remove(self.output_video.replace('.mp4', '.avi'))
-                    print("Removed temporary AVI file")
-                except:
-                    pass
-            else:
-                print(f"FFmpeg conversion failed, keeping AVI format")
-                print(f"FFmpeg error: {result.stderr}")
-                
-        except Exception as e:
-            print(f"Conversion to MP4 failed: {e}")
-            print("Keeping original format")
-
 def main():
     """Main function with command line interface"""
     parser = argparse.ArgumentParser(
-        description="OpenCV GPU-accelerated caption generator",
+        description="OpenCV GPU-accelerated caption generator with auto text wrapping",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -741,7 +787,7 @@ def main():
     parser.add_argument('--margin-bottom', type=int, default=50,
                       help='Bottom margin in pixels')
     parser.add_argument('--max-width', type=int, default=80,
-                      help='Maximum characters per line')
+                      help='Maximum characters per line (for non-auto wrapping)')
     parser.add_argument('--line-spacing', type=float, default=1.2,
                       help='Line spacing multiplier')
     parser.add_argument('--batch-size', type=int, default=200,
@@ -754,6 +800,11 @@ def main():
                       help='Output video quality')
     parser.add_argument('--codec', choices=['auto', 'XVID', 'MJPG', 'mp4v'], default='auto',
                       help='Force specific video codec (auto=try all)')
+    # New arguments for text wrapping
+    parser.add_argument('--no-auto-wrap', action='store_true',
+                      help='Disable automatic text wrapping')
+    parser.add_argument('--max-lines', type=int, default=3,
+                      help='Maximum number of lines for wrapped text')
     
     args = parser.parse_args()
     
@@ -799,7 +850,9 @@ def main():
         use_gpu=not args.no_gpu,
         num_workers=args.workers,
         quality=args.quality,
-        codec=args.codec
+        codec=args.codec,
+        auto_wrap=not args.no_auto_wrap,
+        max_lines=args.max_lines
     )
     
     # Process video
