@@ -107,30 +107,24 @@ class GPUVideoProcessor:
             print(f"GPU setup failed: {e}, falling back to CPU")
     
     def setup_font(self):
-        """Setup font for text rendering"""
-        # 基於診斷結果，優先使用已知可用的字體
-        font_paths = [
-            # 優先使用這些已知在系統中可用的字體
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            # 然後嘗試專門的中文字體（如果用戶安裝了）
-            "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf",  # Common CJK font
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Google Noto CJK
-            "/usr/share/fonts/truetype/arphic/uming.ttc",  # AR PL UMing
-            "/usr/share/fonts/truetype/arphic/ukai.ttc",   # AR PL UKai
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # WenQuanYi Micro Hei
-            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",    # WenQuanYi Zen Hei
-            # Ubuntu/Debian specific paths
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-            # Windows fonts (if available via Wine or mounted)
-            "C:/Windows/Fonts/msyh.ttc",  # Microsoft YaHei
-            "C:/Windows/Fonts/simsun.ttc",  # SimSun
-            "C:/Windows/Fonts/simhei.ttf",  # SimHei
-            # macOS fonts
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        """Setup font for text rendering with verified working font"""
+        # Use the verified working font paths from test results
+        working_font_paths = [
+            "/home/22055747d/.local/share/fonts/wqy-microhei.ttc",  # User's font directory
+            "fonts/wqy-microhei.ttc",                              # Local fonts directory
+            "./fonts/wqy-microhei.ttc",                            # Explicit relative path
+            os.path.expanduser("~/.local/share/fonts/wqy-microhei.ttc")  # Expanded path
         ]
+        
+        # System fallback fonts if needed
+        fallback_font_paths = [
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+        ]
+        
+        # Try all font paths
+        font_paths = working_font_paths + fallback_font_paths
         
         font_found = False
         for font_path in font_paths:
@@ -139,26 +133,23 @@ class GPUVideoProcessor:
                     self.font = ImageFont.truetype(font_path, self.font_size)
                     font_found = True
                     print(f"Using font: {font_path}")
-                    # 測試中文渲染能力
-                    try:
-                        test_bbox = self.font.getbbox("測試中文")
-                        if test_bbox[2] - test_bbox[0] > 0:  # 有實際寬度
-                            print(f"✅ 字體支持中文渲染")
-                        else:
-                            print(f"⚠️  字體可能不完全支持中文，但將繼續使用")
-                    except:
-                        print(f"⚠️  無法測試中文支持，但將繼續使用")
+                    # Test Chinese rendering capability
+                    test_text = "測試中文"
+                    bbox = self.font.getbbox(test_text)
+                    if bbox[2] - bbox[0] > 0:
+                        print("Font supports Chinese characters ✓")
+                    else:
+                        print("Warning: Font may not render Chinese properly")
                     break
                 except Exception as e:
                     print(f"Failed to load font {font_path}: {e}")
                     continue
         
         if not font_found:
-            # Use default font with warning
+            print("WARNING: No suitable font found - Chinese characters will not display correctly!")
             try:
                 self.font = ImageFont.load_default()
-                print("WARNING: Using default font - Chinese characters may not display correctly!")
-                print("建議安裝中文字體: sudo apt-get install fonts-noto-cjk fonts-wqy-microhei")
+                print("Using default font as fallback (limited language support)")
             except Exception as e:
                 print(f"Failed to load default font: {e}")
                 self.font = None
