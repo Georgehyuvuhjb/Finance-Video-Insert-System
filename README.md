@@ -97,7 +97,6 @@ This project includes scripts to help you download and set up Chinese fonts with
    ```bash
    python download_chinese_fonts.py
 
-
 **Azure Speech Service API (for text to speech)**
 
 - **Set environment variables** `SPEECH_KEY` and `ENDPOINT` (Azure Speech Service) 
@@ -962,3 +961,4 @@ python test_system.py
 - [OpenCV Tutorials](https://docs.opencv.org/master/d9/df8/tutorial_root.html)
 
 For issues and questions, please check the troubleshooting section above or create an issue in the project repository.
+
