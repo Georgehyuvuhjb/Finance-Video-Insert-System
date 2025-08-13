@@ -6,7 +6,6 @@ import os
 import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
-from sklearn.cluster import AgglomerativeClustering
 
 class SemanticVideoMatcher:
     """A class that groups sentences by meaning and finds matching videos"""
@@ -92,9 +91,9 @@ class SemanticVideoMatcher:
         
         return result
     
-    def group_sentences_by_meaning(self, sentences, max_sentences_per_group=3, similarity_threshold=0.70):
+    def group_sentences_by_meaning(self, sentences, max_sentences_per_group=3, similarity_threshold=0.5):
         """
-        Group semantically similar sentences together
+        Group semantically similar adjacent sentences together
         
         Args:
             sentences (list): List of sentences
@@ -107,7 +106,7 @@ class SemanticVideoMatcher:
         if not sentences:
             return []
         
-        print(f"Grouping {len(sentences)} sentences by meaning...")
+        print(f"Grouping {len(sentences)} sentences by adjacent meaning (threshold: {similarity_threshold})...")
         
         # Generate sentence embeddings
         sentence_embeddings = self.model.encode(sentences, show_progress_bar=False)
@@ -116,75 +115,50 @@ class SemanticVideoMatcher:
             # If there are few sentences, return them as a single group
             return [{'sentences': sentences, 'start_index': 0, 'end_index': len(sentences) - 1}]
         
-        # Compute similarity matrix
-        similarity_matrix = np.zeros((len(sentences), len(sentences)))
-        for i in range(len(sentences)):
-            for j in range(len(sentences)):
-                # Compute cosine similarity
-                similarity_matrix[i][j] = np.dot(sentence_embeddings[i], sentence_embeddings[j]) / (
-                    np.linalg.norm(sentence_embeddings[i]) * np.linalg.norm(sentence_embeddings[j])
-                )
+        # Group adjacent sentences by similarity
+        groups = []
+        current_group = [0]  # Start with first sentence
         
-        # Convert similarity to distance
-        distance_matrix = 1 - similarity_matrix
-        
-        # Try to create clustering with compatibility for different scikit-learn versions
-        try:
-            # Try with distance_threshold first (newer scikit-learn versions)
-            clustering = AgglomerativeClustering(
-                n_clusters=None,
-                distance_threshold=1 - similarity_threshold,
-                metric='precomputed',
-                linkage='average'
-            ).fit(distance_matrix)
-        except TypeError:
-            try:
-                # Try without affinity for older versions
-                clustering = AgglomerativeClustering(
-                    n_clusters=None,
-                    distance_threshold=1 - similarity_threshold,
-                    metric='precomputed',
-                    linkage='average'
-                ).fit(distance_matrix)
-            except TypeError:
-                # Fall back to specifying number of clusters
-                print("Warning: Using fixed number of clusters as distance_threshold is not supported")
-                n_clusters = max(1, len(sentences) // max_sentences_per_group)
-                clustering = AgglomerativeClustering(
-                    n_clusters=n_clusters,
-                    metric='precomputed',
-                    linkage='average'
-                ).fit(distance_matrix)
-        
-        # Group sentences by cluster label
-        clusters = {}
-        for i, label in enumerate(clustering.labels_):
-            if label not in clusters:
-                clusters[label] = []
-            clusters[label].append(i)
-        
-        # Sort clusters by position in the original text
-        sorted_groups = []
-        for indices in clusters.values():
-            # Sort indices within each cluster
-            sorted_indices = sorted(indices)
+        for i in range(1, len(sentences)):
+            # Check similarity with the last sentence in current group
+            last_sentence_idx = current_group[-1]
             
-            # Split large clusters to respect max_sentences_per_group
-            for i in range(0, len(sorted_indices), max_sentences_per_group):
-                chunk = sorted_indices[i:i + max_sentences_per_group]
-                sorted_groups.append({
-                    'sentences': [sentences[idx] for idx in chunk],
-                    'start_index': min(chunk),
-                    'end_index': max(chunk)
-                })
+            # Compute cosine similarity between current sentence and last sentence in group
+            similarity = np.dot(sentence_embeddings[i], sentence_embeddings[last_sentence_idx]) / (
+                np.linalg.norm(sentence_embeddings[i]) * np.linalg.norm(sentence_embeddings[last_sentence_idx])
+            )
+            
+            # Debug output
+            print(f"  Sentence {i} vs {last_sentence_idx}: similarity = {similarity:.3f}")
+            
+            # If similar enough and group not too large, add to current group
+            if similarity >= similarity_threshold and len(current_group) < max_sentences_per_group:
+                current_group.append(i)
+                print(f"    -> Added to current group (size: {len(current_group)})")
+            else:
+                # Start new group
+                if current_group:
+                    groups.append(current_group)
+                    print(f"    -> Started new group. Previous group had {len(current_group)} sentences")
+                current_group = [i]
         
-        # Sort groups by their position in the original text
-        sorted_groups.sort(key=lambda x: x['start_index'])
+        # Add the last group
+        if current_group:
+            groups.append(current_group)
         
-        print(f"Created {len(sorted_groups)} sentence groups")
+        # Convert to the expected format
+        sorted_groups = []
+        for indices in groups:
+            sorted_groups.append({
+                'sentences': [sentences[idx] for idx in indices],
+                'start_index': min(indices),
+                'end_index': max(indices)
+            })
+        
+        print(f"Created {len(sorted_groups)} sentence groups (adjacent grouping)")
         return sorted_groups
     
-    def find_matching_videos_for_group(self, sentence_group, top_k=2, metadata_path="video_metadata.json"):
+    def find_matching_videos_for_group(self, sentence_group, top_k=2, metadata_path="video_metadata.json", distance_threshold=2.0):
         """
         Find matching videos for a sentence group
         
@@ -192,6 +166,7 @@ class SemanticVideoMatcher:
             sentence_group (dict): Dict with 'sentences' key containing sentences
             top_k (int): Number of videos to return
             metadata_path (str): Path to video metadata
+            distance_threshold (float): Maximum distance threshold for filtering videos
             
         Returns:
             list: List of matching videos
@@ -214,9 +189,16 @@ class SemanticVideoMatcher:
         combined = list(zip(distances[0], indices[0]))
         combined.sort(key=lambda x: x[0])  # Sort by distance (ascending)
         
-        # Format results
+        # Format results and apply distance threshold filtering
         results = []
+        filtered_count = 0
+        
         for distance, idx in combined:
+            # Apply distance threshold filter
+            if distance > distance_threshold:
+                filtered_count += 1
+                continue
+                
             idx_str = str(int(idx))
             video_id = self.id_mapping[idx_str]
             
@@ -237,9 +219,99 @@ class SemanticVideoMatcher:
                 "thumbnail": thumbnail_url
             })
         
+        if filtered_count > 0:
+            print(f"  Filtered out {filtered_count} videos with distance > {distance_threshold}")
+        
+        if not results:
+            print(f"  No videos found within distance threshold {distance_threshold}")
+        
         return results
     
-    def process_text(self, text, max_sentences_per_group=3, top_k=2, metadata_path="video_metadata.json"):
+    def parse_timestamp_text(self, text):
+        """
+        Parse text with timestamp format: start_time_end_time_sentence
+        
+        Args:
+            text (str): Input text with timestamps
+            
+        Returns:
+            list: List of sentences with timing information
+        """
+        lines = text.strip().split('\n')
+        sentences_with_timing = []
+        
+        for line in lines:
+            if not line.strip():
+                continue
+                
+            # Parse format: MM:SS.ms_MM:SS.ms_sentence
+            parts = line.split('_', 2)
+            if len(parts) >= 3:
+                start_time = parts[0]
+                end_time = parts[1] 
+                sentence = parts[2]
+                
+                sentences_with_timing.append({
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "sentence": sentence,
+                    "duration": self.calculate_duration(start_time, end_time)
+                })
+            else:
+                # If no timestamp, treat as regular sentence
+                sentences_with_timing.append({
+                    "start_time": None,
+                    "end_time": None,
+                    "sentence": line,
+                    "duration": None
+                })
+        
+        return sentences_with_timing
+    
+    def calculate_duration(self, start_time, end_time):
+        """
+        Calculate duration between two timestamps in MM:SS.ms format
+        
+        Args:
+            start_time (str): Start time in MM:SS.ms format
+            end_time (str): End time in MM:SS.ms format
+            
+        Returns:
+            str: Duration in MM:SS.ms format
+        """
+        try:
+            # Parse start time
+            start_parts = start_time.split(':')
+            start_minutes = int(start_parts[0])
+            start_seconds_parts = start_parts[1].split('.')
+            start_seconds = int(start_seconds_parts[0])
+            start_ms = int(start_seconds_parts[1]) if len(start_seconds_parts) > 1 else 0
+            
+            # Parse end time
+            end_parts = end_time.split(':')
+            end_minutes = int(end_parts[0])
+            end_seconds_parts = end_parts[1].split('.')
+            end_seconds = int(end_seconds_parts[0])
+            end_ms = int(end_seconds_parts[1]) if len(end_seconds_parts) > 1 else 0
+            
+            # Calculate total milliseconds
+            start_total_ms = (start_minutes * 60 + start_seconds) * 100 + start_ms
+            end_total_ms = (end_minutes * 60 + end_seconds) * 100 + end_ms
+            
+            duration_ms = end_total_ms - start_total_ms
+            
+            # Convert back to MM:SS.ms format
+            duration_seconds = duration_ms // 100
+            duration_ms_remainder = duration_ms % 100
+            duration_minutes = duration_seconds // 60
+            duration_seconds_remainder = duration_seconds % 60
+            
+            return f"{duration_minutes:02d}:{duration_seconds_remainder:02d}.{duration_ms_remainder:02d}"
+            
+        except (ValueError, IndexError):
+            return "00:00.00"
+    
+    def process_text(self, text, max_sentences_per_group=3, top_k=2, metadata_path="video_metadata.json", has_timestamps=False, similarity_threshold=0.5, distance_threshold=2.0):
         """
         Process text by splitting into sentences, grouping, and finding matching videos
         
@@ -248,35 +320,98 @@ class SemanticVideoMatcher:
             max_sentences_per_group (int): Maximum sentences per group
             top_k (int): Number of videos to return per group
             metadata_path (str): Path to video metadata
+            has_timestamps (bool): Whether the text has timestamp format
+            similarity_threshold (float): Threshold for grouping adjacent sentences
+            distance_threshold (float): Maximum distance threshold for video matching
             
         Returns:
             list: List of groups with matching videos
         """
-        # Split text into sentences
-        sentences = self.split_text_into_sentences(text)
+        if has_timestamps:
+            # Parse timestamped text
+            sentences_with_timing = self.parse_timestamp_text(text)
+            sentences = [item["sentence"] for item in sentences_with_timing]
+        else:
+            # Split text into sentences normally
+            sentences = self.split_text_into_sentences(text)
+            sentences_with_timing = [{"sentence": s, "start_time": None, "end_time": None, "duration": None} 
+                                   for s in sentences]
+        
         if not sentences:
             return []
         
         # Group sentences by meaning
         sentence_groups = self.group_sentences_by_meaning(
-            sentences, max_sentences_per_group=max_sentences_per_group
+            sentences, max_sentences_per_group=max_sentences_per_group, similarity_threshold=similarity_threshold
         )
         
-        # Find matching videos for each group
+        # Find matching videos for each group and add timing information
         results = []
         for i, group in enumerate(sentence_groups):
             print(f"Finding videos for group {i+1}/{len(sentence_groups)}...")
             matching_videos = self.find_matching_videos_for_group(
-                group, top_k=top_k, metadata_path=metadata_path
+                group, top_k=top_k, metadata_path=metadata_path, distance_threshold=distance_threshold
             )
             
+            # Calculate group timing if timestamps are available
+            group_timing = self.calculate_group_timing(group, sentences_with_timing)
+            
             results.append({
+                "group_id": i + 1,
                 "sentence_group": group,
-                "matching_videos": matching_videos
+                "matching_videos": matching_videos,
+                "timing": group_timing
             })
         
         return results
-
+    
+    def calculate_group_timing(self, group, sentences_with_timing):
+        """
+        Calculate timing information for a sentence group
+        
+        Args:
+            group (dict): Sentence group
+            sentences_with_timing (list): List of sentences with timing info
+            
+        Returns:
+            dict: Timing information for the group
+        """
+        group_sentences = group["sentences"]
+        
+        # Find timing info for sentences in this group
+        group_timings = []
+        for group_sentence in group_sentences:
+            for timing_info in sentences_with_timing:
+                if timing_info["sentence"] == group_sentence:
+                    group_timings.append(timing_info)
+                    break
+        
+        if not group_timings or not any(t["start_time"] for t in group_timings):
+            return {
+                "start_time": None,
+                "end_time": None,
+                "duration": None
+            }
+        
+        # Get start time from first sentence and end time from last sentence
+        valid_timings = [t for t in group_timings if t["start_time"]]
+        if not valid_timings:
+            return {
+                "start_time": None,
+                "end_time": None,
+                "duration": None
+            }
+        
+        start_time = valid_timings[0]["start_time"]
+        end_time = valid_timings[-1]["end_time"]
+        duration = self.calculate_duration(start_time, end_time)
+        
+        return {
+            "start_time": start_time,
+            "end_time": end_time,
+            "duration": duration
+        }
+    
 def format_results(results):
     """Format results for display"""
     output = []
@@ -286,9 +421,15 @@ def format_results(results):
     for i, result in enumerate(results):
         group = result["sentence_group"]
         videos = result["matching_videos"]
+        timing = result.get("timing", {})
         
         output.append(f"GROUP {i+1}:")
         output.append("-" * 40)
+        
+        # Display timing information if available
+        if timing.get("start_time"):
+            output.append(f"Time: {timing['start_time']} - {timing['end_time']}, Duration: {timing['duration']}")
+            output.append("")
         
         # Display sentences in the group
         output.append("Sentences:")
@@ -296,13 +437,56 @@ def format_results(results):
             output.append(f"  {j+1}. {sentence}")
         
         # Display matching videos
-        output.append("\nMatching Videos:")
-        for j, video in enumerate(videos):
-            output.append(f"  {j+1}. Video ID: {video['video_id']} (Distance: {video['distance']:.4f})")
-            output.append(f"     URL: {video['url']}")
-            output.append(f"     Tags: {video['tags']}")
+        if videos:
+            output.append("\nMatching Videos:")
+            for j, video in enumerate(videos):
+                output.append(f"  {j+1}. Video ID: {video['video_id']} (Distance: {video['distance']:.4f})")
+                output.append(f"     URL: {video['url']}")
+                output.append(f"     Tags: {video['tags']}")
+        else:
+            output.append("\nNo matching videos found within distance threshold.")
         
         output.append("\n" + "=" * 50 + "\n")
+    
+    return "\n".join(output)
+
+def format_recommendations(results):
+    """Format results in Chinese for recommendations display"""
+    output = []
+    
+    output.append("推薦插入點分析")
+    output.append("================\n")
+    
+    for i, result in enumerate(results):
+        group = result["sentence_group"]
+        videos = result["matching_videos"]
+        timing = result.get("timing", {})
+        group_id = result.get("group_id", i + 1)
+        
+        # Display timing information
+        if timing.get("start_time"):
+            output.append(f"句子群組 {group_id} (時間: {timing['start_time']} - {timing['end_time']}, 時長: {timing['duration']}):")
+        else:
+            output.append(f"句子群組 {group_id}:")
+        
+        output.append("句子內容:")
+        for sentence in group["sentences"]:
+            output.append(f"- {sentence}")
+        
+        if videos:
+            output.append("\n推薦影片:")
+            for j, video in enumerate(videos):
+                distance_score = video['distance']  # Use distance directly
+                output.append(f"{j+1}. {video['video_id']} (distance: {distance_score:.4f})")
+                if video.get('tags'):
+                    output.append(f"   標籤: {video['tags']}")
+        else:
+            output.append("\n無符合距離閾值的推薦影片")
+        
+        if timing.get("duration"):
+            output.append(f"\n可用時長: {timing['duration']}")
+        
+        output.append("\n---\n")
     
     return "\n".join(output)
 
@@ -316,6 +500,9 @@ def main():
     parser.add_argument('--num-videos', type=int, default=2, help='Number of videos per group')
     parser.add_argument('--output', type=str, help='Output file path (optional)')
     parser.add_argument('--top-k', type=int, default=2, help='Number of top matching videos to return')
+    parser.add_argument('--similarity-threshold', type=float, default=0.5, help='Similarity threshold for grouping adjacent sentences (default: 0.5)')
+    parser.add_argument('--distance-threshold', type=float, default=2.0, help='Maximum distance threshold for video matching - videos with higher distance will be filtered out (default: 2.0)')
+    parser.add_argument('--show-recommendations', action='store_true', help='Show recommendations in Chinese format')
 
     args = parser.parse_args()
     
@@ -337,66 +524,80 @@ def main():
             pass
         input_text = '\n'.join(lines)
     
+    # Detect if input has timestamp format
+    has_timestamps = bool(re.search(r'\d{2}:\d{2}\.\d{2}_\d{2}:\d{2}\.\d{2}_', input_text))
+    if has_timestamps:
+        print("Detected timestamp format in input text")
+    
     # Initialize matcher and process text
     matcher = SemanticVideoMatcher(args.vectors)
     results = matcher.process_text(
         input_text,
         max_sentences_per_group=args.max_group_size,
         top_k=args.top_k,
-        metadata_path=args.metadata
+        metadata_path=args.metadata,
+        has_timestamps=has_timestamps,
+        similarity_threshold=args.similarity_threshold,
+        distance_threshold=args.distance_threshold
     )
     
     # Format and display results
-    formatted_results = format_results(results)
+    if args.show_recommendations:
+        formatted_results = format_recommendations(results)
+    else:
+        formatted_results = format_results(results)
+    
     print(formatted_results)
     
     # Save results to file if specified
     if args.output:
-        # Save original formatted output
+        # Save formatted output
         with open(args.output, 'w', encoding='utf-8') as f:
             f.write(formatted_results)
             print(f"Results saved to {args.output}")
         
-        # Also save JSON output with same base name but .json extension
+        # Also save enhanced JSON output with timing information
         json_output = os.path.splitext(args.output)[0] + '.json'
+        json_data = {
+            "sentence_groups": []
+        }
+        
+        for group_result in results:
+            group_data = group_result["sentence_group"]
+            videos_data = []
+            timing = group_result.get("timing", {})
+            
+            for video in group_result["matching_videos"]:
+                # Convert distance to similarity score
+                similarity_score = 1.0 - video["distance"]
+                
+                video_entry = {
+                    "video_id": video["video_id"],
+                    "similarity_score": round(similarity_score, 4),
+                    "distance": round(float(video["distance"]), 4),
+                    "tags": video.get("tags", "").split(", ") if video.get("tags") else [],
+                    "description": video.get("title", f"Video {video['video_id']}"),
+                    "url": video.get("url", ""),
+                    "thumbnail": video.get("thumbnail", "")
+                }
+                videos_data.append(video_entry)
+            
+            group_entry = {
+                "group_id": group_result.get("group_id", 1),
+                "start_time": timing.get("start_time"),
+                "end_time": timing.get("end_time"),
+                "duration": timing.get("duration"),
+                "sentences": group_data["sentences"],
+                "recommended_videos": videos_data
+            }
+            
+            json_data["sentence_groups"].append(group_entry)
+        
         with open(json_output, 'w', encoding='utf-8') as f:
-            # Convert results to serializable format
-            serializable_results = []
-            
-            for group_result in results:
-                group_data = group_result["sentence_group"]
-                videos_data = []
-                
-                for video in group_result["matching_videos"]:
-                    # Ensure all values are serializable
-                    video_entry = {
-                        "video_id": video["video_id"],
-                        "distance": float(video["distance"]),
-                        "title": video.get("title", f"Video {video['video_id']}"),
-                        "tags": video.get("tags", ""),
-                        "url": video.get("url", ""),
-                        "thumbnail": video.get("thumbnail", "")
-                    }
-                    videos_data.append(video_entry)
-                
-                serializable_results.append({
-                    "sentence_group": {
-                        "sentences": group_data["sentences"],
-                        "start_index": group_data.get("start_index", 0),
-                        "end_index": group_data.get("end_index", 0)
-                    },
-                    "matching_videos": videos_data
-                })
-            
-            # Write JSON with UTF-8 encoding and pretty print
-            json.dump(serializable_results, f, ensure_ascii=False, indent=2)
-            print(f"JSON results saved to {json_output}")
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+            print(f"Enhanced JSON results saved to {json_output}")
     
-    # Return a more structured JSON format if needed
     return results
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

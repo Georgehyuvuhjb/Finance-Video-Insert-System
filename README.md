@@ -2,10 +2,163 @@
 
 An automated video production system that can automatically insert relevant video clips into financial reporting videos using AI-driven content matching and video composition techniques.
 
-<!--
 ## Recent Bug Fixes and Improvements
 
-### Video Matching Logic Fix (Latest)
+### PyTorch Conversion for HPC Compatibility (Latest - December 2024)
+
+**Issue:** FFmpeg compatibility issues in HPC (High Performance Computing) environments.
+
+**Root Cause:** The manual video insertion system relied on FFmpeg subprocess calls which:
+- Failed to execute properly in HPC cluster environments
+- Had external dependency issues in containerized deployments
+- Lacked GPU acceleration capabilities for video processing
+- Created system compatibility barriers for deployment
+
+**Solution:** Complete conversion to PyTorch-based video processing:
+- **Pure Python implementation**: Replaced FFmpeg subprocess calls with PyTorch tensor operations
+- **GPU acceleration**: Added CUDA support for faster video processing on GPU clusters
+- **HPC compatibility**: Ensured compatibility with containerized and cluster environments
+- **Batch processing**: Implemented efficient batch processing for large video operations
+- **Progress monitoring**: Maintained real-time progress feedback during processing
+
+**Technical Implementation:**
+- New `PyTorchVideoProcessor` class with GPU-accelerated frame operations
+- OpenCV for video I/O, PyTorch for processing and overlay operations
+- Tensor-based frame resizing, positioning, and blending
+- Memory-efficient batch processing with configurable batch sizes
+
+**Files Modified:**
+- `manual_insert/manual_inserter.py` - Complete rewrite using PyTorch
+- `requirements.txt` - Updated with PyTorch dependencies
+- `manual_insert/test_pytorch_version.yaml` - Added test configuration
+
+**Usage Impact:** 
+- Video processing now works in HPC environments without external dependencies
+- GPU acceleration provides significant performance improvements
+- Memory-efficient processing handles large 4K videos (up to 180GB estimated memory requirement)
+- Automatic chunked processing prevents GPU memory overflow
+- Audio insertion temporarily removed (use FFmpeg separately for audio if needed)
+- Maintains all existing functionality including center-based coordinates and progress monitoring
+
+**Memory Optimization Features:**
+- Conservative GPU memory allocation (60% instead of 80%)
+- Automatic batch size adjustment based on available GPU memory  
+- Chunked processing for videos requiring >10GB memory
+- Real-time memory monitoring and cleanup
+- Support for videos up to 4K resolution on 16GB+ GPUs
+- **Efficient segment processing**: Only processes modified video segments (99%+ memory savings)
+- **Automatic audio preservation**: Maintains original audio track using FFmpeg or moviepy fallback
+
+### JSON Format Compatibility Fix (Previous - August 2025)
+
+**Issue:** Module compatibility issues due to JSON format changes in the semantic matching system.
+
+**Root Cause:** The data-match module updated its JSON output format from direct arrays to a `sentence_groups` wrapper structure, causing compatibility issues in downstream modules:
+- video-merge and video-merge-simple modules expecting old format fields
+- Field name changes from `matching_videos` to `recommended_videos`
+- Nested structure changes affecting video composition pipeline
+
+**Solution:** Implemented comprehensive format detection and compatibility:
+- **Automatic format detection**: All modules now detect and handle both old and new JSON formats
+- **Field name mapping**: Dynamic mapping between `matching_videos`/`recommended_videos` and related fields
+- **Backward compatibility**: Full support for existing JSON files and workflows
+- **Enhanced error handling**: Graceful fallbacks and informative error messages
+
+**Files Modified:**
+- `data_match/semantic_video_matcher.py` - Fixed duplicate execution and JSON output format
+- `video_merge/video_composer.py` - Added JSON format compatibility detection
+- `video_merge/video_composer2.py` - Enhanced format detection and field mapping
+- `manual_insert/manual_inserter.py` - Added compatibility for show-recommendations feature
+
+**Usage Impact:** All modules now seamlessly work with both old and new JSON formats, ensuring uninterrupted workflows and backward compatibility.
+
+### Manual Video Insert Improvements (Latest - August 2025)
+
+**Issue:** Manual video insertion had several usability and functionality problems.
+
+**Root Cause:** The manual insertion system had coordinate system inconsistencies, lack of progress feedback, and video encoding issues leading to:
+- Position coordinates using top-left corner instead of center point (inconsistent with video-merge)
+- No progress indication during processing, making it unclear if the system was working
+- Static video frames instead of animated clips due to codec issues
+- Poor user experience with long processing times
+
+**Solution:** Implemented comprehensive manual insertion improvements:
+- **Center-based coordinates**: Position parameters now specify center point, consistent with video-merge module
+- **Progress monitoring**: Real-time progress bars and status updates during video processing
+- **Enhanced video encoding**: Proper codec settings to ensure dynamic video clips instead of static frames
+- **Better error handling**: Improved feedback and debugging information
+
+**Files Modified:**
+- `manual_insert/manual_inserter.py` - Overhauled coordinate system, added progress monitoring, fixed video encoding
+
+**Usage Impact:** Manual video insertion now provides consistent positioning, clear progress feedback, and properly animated video clips.
+
+### Small Video Download Fix (Previous - August 2025)
+
+**Issue:** API error when downloading fewer than 3 videos from Pixabay.
+
+**Root Cause:** The Pixabay API requires a minimum value of 3 for the `per_page` parameter, but the system was setting it to match the requested number of videos (e.g., 2), causing:
+- `[ERROR 400] "per_page" is out of valid range` error
+- Failed downloads for requests of 1-2 videos
+- Inconsistent behavior for small batch downloads
+
+**Solution:** Implemented minimum parameter validation:
+- **Minimum per_page enforcement**: Always use minimum 3 for `per_page` parameter
+- **Proper result limiting**: Download minimum required but return only requested number
+- **Better error handling**: Graceful handling of API parameter constraints
+
+**Files Modified:**
+- `data_collect_label/data_collect.py` - Fixed `per_page` parameter validation in `search_videos()` method
+
+**Usage Impact:** Small video downloads (1-2 videos) now work correctly without API errors.
+
+### Semantic Matching Algorithm Improvements (Latest - August 2025)
+
+**Issue:** Original semantic clustering grouped non-adjacent sentences across the entire document, affecting narrative flow and coherence.
+
+**Root Cause:** The previous algorithm used `AgglomerativeClustering` to group semantically similar sentences regardless of their position in the text, leading to:
+- Non-adjacent sentences being grouped together
+- Breaking narrative flow and temporal coherence
+- Unwanted "suggested insert time" fields in outputs
+- Lack of quality control for video matches
+
+**Solution:** Implemented adjacent-only sentence grouping with quality control:
+- **Adjacent sentence grouping**: Only groups consecutive sentences based on similarity
+- **Similarity threshold control**: `--similarity-threshold` parameter (default: 0.5) controls grouping sensitivity
+- **Distance threshold filtering**: `--distance-threshold` parameter (default: 2.0) filters out poorly matching videos
+- **Enhanced output**: Removed suggested insert time fields, added debug similarity scores
+- **Quality control**: Groups can have zero matching videos if none meet the distance threshold
+
+**Files Modified:**
+- `data_match/semantic_video_matcher.py` - Complete algorithm redesign with adjacent-only grouping
+- Removed AgglomerativeClustering dependency, added dual threshold system
+- Enhanced parameter passing and error handling throughout the processing chain
+
+**Usage Impact:** Video matching now preserves narrative flow by only grouping adjacent sentences, with improved match quality through distance filtering. The system provides better control over grouping behavior and video match quality.
+
+### Video Tensor Dimension Fix (Previous - August 2025)
+
+**Issue:** Tensor dimension mismatches causing video overlay failures during composition.
+
+**Root Cause:** Overlay videos with different aspect ratios (especially vertical videos) were not properly resized, leading to:
+- `RuntimeError: The size of tensor a (2160) must match the size of tensor b (3612)` errors
+- Failed video insertions at specific timestamps
+- Inconsistent overlay rendering for videos exceeding main video boundaries
+
+**Solution:** Implemented intelligent dimension management:
+- **Boundary checking**: Automatic detection of overlay videos exceeding main video dimensions
+- **Aspect ratio preservation**: Smart resizing maintaining original video proportions
+- **Dynamic size calculation**: Overlay videos automatically fit within available space
+- **Error recovery**: Graceful handling of dimension mismatches with detailed logging
+
+**Files Modified:**
+- `video_merge/video_composer.py` - Enhanced `overlay_batch()` and `parse_size()` methods
+- Added comprehensive size validation and automatic resize logic
+
+**Usage Impact:** Video composition now handles all video aspect ratios correctly, eliminating tensor errors and ensuring all overlay videos are properly inserted.
+
+<!--
+### Video Matching Logic Fix (Previous)
 
 **Issue:** Videos were repeating incorrectly during playback due to misaligned mapping between sentence groups and transcript entries.
 
@@ -50,6 +203,12 @@ video_code/
 ├── video_merge/             # Video composition module
 │   ├── video_composer.py     # PyTorch GPU-accelerated composer
 │   └── video_composer2.py    # MoviePy-based simple composer
+├── manual_insert/           # Manual video/audio insertion module
+│   ├── manual_inserter.py    # Manual insertion control
+│   └── config_example.yaml   # Configuration example
+└── auto_caption/            # Auto captioning module (under development)
+```
+│   └── video_composer2.py    # MoviePy-based simple composer
 └── auto_caption/            # Auto captioning module (under development)
 ```
 
@@ -84,18 +243,6 @@ python main.py list                      # No -- needed
 pip install -r requirements.txt
 
 ```
-
-## Font Setup for Chinese Character Support
-
-If you're running this application in an environment without Chinese fonts or without admin privileges, follow these steps to set up the required fonts.
-
-### Downloading Chinese Fonts
-
-This project includes scripts to help you download and set up Chinese fonts without admin privileges:
-
-1. Run the font downloader script:
-   ```bash
-   python download_chinese_fonts.py
 
 **Azure Speech Service API (for text to speech)**
 
@@ -299,20 +446,20 @@ python main.py video-vectorize -- --model all-MiniLM-L6-v2 --batch-size 128
 
 ### Step 5: Data Matching
 
-Find matching videos for text content using semantic search.
+Find matching videos for text content using semantic search with adjacent sentence grouping.
 
 ```bash
 # Direct text input
 python main.py data-match -- --text "Stock market performance today shows positive trends"
 
-# File input
-python main.py data-match -- --file input_text/script.txt
+# File input with similarity threshold control
+python main.py data-match -- --file input_text/script.txt --similarity-threshold 0.4
 
-# Specify output files
-python main.py data-match -- --file script.txt --output results.txt
+# Distance threshold for match quality control
+python main.py data-match -- --file script.txt --distance-threshold 1.5 --output results.txt
 
-# Custom parameters
-python main.py data-match -- --text "finance news" --max-group-size 5 --num-videos 3 --top-k 5
+# Combined thresholds for precise control
+python main.py data-match -- --text "finance news" --similarity-threshold 0.6 --distance-threshold 1.8 --max-group-size 5 --num-videos 3
 ```
 
 **Module Parameters:**
@@ -324,19 +471,25 @@ python main.py data-match -- --text "finance news" --max-group-size 5 --num-vide
 - `--num-videos`: Number of videos per group (default: 2)
 - `--output`: Output file path (optional)
 - `--top-k`: Number of top matching videos to return (default: 2)
+- `--similarity-threshold`: Similarity threshold for adjacent sentence grouping (default: 0.5)
+- `--distance-threshold`: Maximum distance threshold for video matching (default: 2.0)
 
-**Grouping Parameters:**
-- Sentences are automatically grouped by semantic similarity
-- `max_sentences_per_group`: Controls group size (default: 3)
-- `similarity_threshold`: Threshold for grouping (default: 0.70, configurable in code)
+**New Grouping Algorithm:**
+- **Adjacent-only grouping**: Only groups consecutive sentences based on cosine similarity
+- **Similarity threshold**: Controls when adjacent sentences are grouped together (0.0-1.0)
+- **Distance filtering**: Videos with distance above threshold are excluded from results
+- **Quality control**: Groups may have zero videos if none meet the distance threshold
 
 **Advanced Usage:**
 ```bash
-# Large groups with more video options
-python main.py data-match -- --file script.txt --max-group-size 10 --num-videos 5 --top-k 10
+# Strict grouping with high-quality matches only
+python main.py data-match -- --file script.txt --similarity-threshold 0.7 --distance-threshold 1.0
 
-# Custom vector directory and metadata
-python main.py data-match -- --text "market analysis" --vectors custom_vectors --metadata custom_metadata.json
+# Permissive grouping with moderate quality filtering
+python main.py data-match -- --file script.txt --similarity-threshold 0.3 --distance-threshold 2.5
+
+# Debug mode to see similarity scores
+python main.py data-match -- --text "market analysis" --similarity-threshold 0.4 --distance-threshold 2.0
 ```
 
 **Interactive Mode:**
@@ -345,6 +498,13 @@ python main.py data-match -- --text "market analysis" --vectors custom_vectors -
 python main.py data-match
 ```
 
+**Algorithm Benefits:**
+- **Preserves narrative flow**: Only adjacent sentences are grouped
+- **Quality control**: Distance threshold filters poor matches
+- **Tunable sensitivity**: Similarity threshold controls grouping behavior
+- **Debug feedback**: Shows similarity scores between adjacent sentences
+- **Graceful handling**: Groups with no matching videos are handled properly
+
 **Prerequisites:**
 - Created video vector index
 - Labeled video database
@@ -352,6 +512,8 @@ python main.py data-match
 **Output:**
 - Text format: Formatted results with sentence groups and matching videos
 - JSON format: Structured data for video composition (automatically created with .json extension)
+- No suggested insert time fields (removed for cleaner output)
+- Debug information showing similarity scores and filtering decisions
 
 ### Step 6: Video Composition
 
@@ -362,11 +524,13 @@ Compose final video by inserting matched video clips at specific timestamps. Cho
 ```bash
 # Basic video composition with PyTorch
 python main.py video-merge -- \
-    --json data_match/output/matches.json \
-    --transcript text_to_speech/output/script/script.txt \
-    --input-video main_video.mp4 \
-    --videos-dir data_collect_label/videos \
-    --output final_video.mp4
+    --json outputs/data_match/matches.json \
+    --transcript outputs/tts/script/script.txt \
+    --input-video input/video.mp4 \
+    --videos-dir outputs/videos \
+    --output merge.mp4 \
+    --audio outputs/tts/script/script.wav \
+    --batch-size 200
 
 # Advanced composition with custom positioning and audio
 python main.py video-merge -- \
@@ -403,10 +567,10 @@ python main.py video-merge -- \
 ```bash
 # Simple video composition with automatic downloads
 python main.py video-merge-simple -- \
-    --json data_match/output/matches.json \
-    --transcript text_to_speech/output/script/script.txt \
-    --input-video main_video.mp4 \
-    --output final_video_simple.mp4
+    --json outputs/data_match/matches.json \
+    --transcript outputs/tts/script/script.txt \
+    --input-video input/video.mp4 \
+    --output outputs/merge.mp4
 
 # With custom positioning and audio
 python main.py video-merge-simple -- \
@@ -550,8 +714,6 @@ python main.py auto-caption -- \
 - `--no-gpu`: Disable GPU acceleration
 - `--workers`: Number of worker threads (default: 4)
 - `--quality`: Output quality - "normal", "high" (default: "high")
-- `--no-auto-wrap`: Disable automatic text wrapping (enabled by default)
-- `--max-lines`: Maximum number of lines for wrapped text (default: 3)
 
 #### Method 2: FFmpeg-based (Alternative for systems with FFmpeg GPU support)
 
@@ -661,6 +823,499 @@ python main.py auto-caption -- \
 - Professional-quality text rendering with shadow effects
 
 
+### Step 8: Manual Video and Audio Insertion
+
+Manually insert video clips and audio overlays into your main video using a flexible configuration system. This module provides complete control over when, where, and how media is inserted, with support for multiple simultaneous insertions.
+
+#### 8.1 Display Recommendations
+
+First, generate enhanced recommendations with timing information from your matched data:
+
+```bash
+# Generate recommendations with timing data
+python main.py data-match -- \
+    --file outputs/tts/script/script.txt \
+    --show-recommendations \
+    --output outputs/data_match/matches_with_timing.txt
+
+# Display existing recommendations in Chinese format
+python main.py manual-insert -- --show-recommendations outputs/data_match/matches.json
+```
+
+**Example Output:**
+```
+推薦插入點分析
+================
+
+句子群組 1 (時間: 00:00.05 - 00:10.68, 時長: 00:10.63):
+句子內容:
+- 你好, 我係Christina，我哋依家一齊嚟睇下2025年7月28日至2025年8月1日嘅美國股市市場分析同預測。
+- 美股近期表現強勁，標普500同納指屢創歷史新高。
+
+推薦影片:
+1. 172888_finance_large.mp4 (distance: 0.1521)
+   標籤: finance, stock market, analysis
+```
+
+#### 8.2 Create Configuration File
+
+Create a YAML configuration file to define your manual insertions:
+
+```yaml
+# manual_insert_config.yaml
+
+# Video insertions - insert multiple videos at specific times
+video_inserts:
+  # Insert at 5 seconds into main video
+  - time: "00:05.00"              # When to insert in main video
+    videos:
+      # First video clip (top-left corner)
+      - source: "data_collect_label/videos/172888_finance_large.mp4"
+        start: "00:00.00"          # Start time in source video
+        duration: "00:03.00"       # How long to insert
+        position: "top-left"       # Position on screen
+        size: "25%"               # Size as percentage of main video width
+        loop: true                # Loop if source is shorter than duration
+      
+      # Second video clip (top-right corner, same time)
+      - source: "data_collect_label/videos/172891_finance_large.mp4"
+        start: "00:02.00"
+        duration: "00:03.00"
+        position: "top-right"
+        size: "25%"
+        loop: false
+
+  # Insert at 15 seconds
+  - time: "00:15.00"
+    videos:
+      - source: "data_collect_label/videos/172894_finance_large.mp4"
+        start: "00:00.00"
+        duration: "00:05.00"
+        position: "50%,20%"        # Custom position (50% from left, 20% from top)
+        size: "30%"
+        loop: true
+
+# Audio insertions - add audio overlays (optional)
+audio_inserts:
+  # Background music overlay
+  - time: "00:02.00"              # When to start audio in main video
+    source: "path/to/background_music.mp3"
+    start: "00:30.00"             # Start time in source audio
+    duration: "00:10.00"          # How long to play
+    volume: 0.3                   # Volume level (0.0 to 1.0+)
+    mix_mode: "overlay"           # "overlay" (mix) or "replace"
+  
+  # Sound effect
+  - time: "00:05.00"
+    source: "path/to/sound_effect.wav"
+    start: "00:00.00"
+    duration: "00:01.00"
+    volume: 0.8
+    mix_mode: "overlay"
+```
+
+#### 8.3 Command Line Direct Insertion
+
+For quick insertions without creating a configuration file, use command line parameters:
+
+##### Video Insertion via Command Line
+
+```bash
+# Insert a single video clip
+python main.py manual-insert -- \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4 \
+    --add-video data_collect_label/videos/172888_finance_large.mp4 \
+    --insert-time "00:05.00" \
+    --clip-start "00:02.00" \
+    --clip-duration "00:03.00" \
+    --position "top-right" \
+    --size "25%" \
+    --loop
+
+# Insert video with custom positioning
+python main.py manual-insert -- \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4 \
+    --add-video path/to/chart_video.mp4 \
+    --insert-time "00:10.00" \
+    --clip-start "00:00.00" \
+    --clip-duration "00:05.00" \
+    --position "50%,20%" \
+    --size "30%"
+
+# Quick insertion with defaults (3 seconds at top-right)
+python main.py manual-insert -- \
+    --input-video main_video.mp4 \
+    --output result.mp4 \
+    --add-video overlay.mp4 \
+    --insert-time "00:15.00"
+```
+
+##### Audio Insertion via Command Line
+
+```bash
+# Insert background music
+python main.py manual-insert -- \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4 \
+    --add-audio path/to/background_music.mp3 \
+    --audio-time "00:02.00" \
+    --audio-start "00:30.00" \
+    --audio-duration "00:10.00" \
+    --volume 0.3 \
+    --mix-mode overlay
+
+# Insert sound effect with volume boost
+python main.py manual-insert -- \
+    --input-video main_video.mp4 \
+    --output result.mp4 \
+    --add-audio sound_effect.wav \
+    --audio-time "00:05.00" \
+    --audio-duration "00:01.00" \
+    --volume 0.8
+
+# Replace original audio temporarily
+python main.py manual-insert -- \
+    --input-video main_video.mp4 \
+    --output result.mp4 \
+    --add-audio narration.mp3 \
+    --audio-time "00:10.00" \
+    --audio-duration "00:08.00" \
+    --volume 1.0 \
+    --mix-mode replace
+```
+
+##### Combined Video and Audio Insertion
+
+```bash
+# Insert both video and audio simultaneously
+python main.py manual-insert -- \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4 \
+    --add-video data_collect_label/videos/172888_finance_large.mp4 \
+    --insert-time "00:05.00" \
+    --clip-duration "00:03.00" \
+    --position "top-left" \
+    --size "25%" \
+    --add-audio background_music.mp3 \
+    --audio-time "00:05.00" \
+    --audio-duration "00:10.00" \
+    --volume 0.4
+```
+
+**Command Line Parameters:**
+
+**Video Insertion Parameters:**
+- `--add-video`: Path to source video file (required for video insertion)
+- `--insert-time`: Time to insert in main video - MM:SS.ms format (required for video insertion)
+- `--clip-start`: Start time in source video (default: "00:00.00")
+- `--clip-duration`: Duration to insert (default: "00:03.00")
+- `--position`: Position on screen - presets or coordinates (default: "top-right")
+- `--size`: Size as percentage or pixels (default: "25%")
+- `--loop`: Loop video if source is shorter than duration (flag)
+
+**Audio Insertion Parameters:**
+- `--add-audio`: Path to source audio file (required for audio insertion)
+- `--audio-time`: Time to start audio in main video - MM:SS.ms format (required for audio insertion)
+- `--audio-start`: Start time in source audio (default: "00:00.00")
+- `--audio-duration`: Audio duration to insert (default: "00:05.00")
+- `--volume`: Audio volume level, 0.0-1.0+ (default: 0.8)
+- `--mix-mode`: Audio mix mode - "overlay" or "replace" (default: "overlay")
+
+**Common Parameters:**
+- `--input-video`: Path to main video file (required)
+- `--output`: Path for output video file (required)
+- `--temp-dir`: Directory for temporary files (optional)
+
+#### 8.4 Execute Manual Insertions with Configuration File
+
+#### 8.4 Execute Manual Insertions with Configuration File
+
+Process your video with the configuration file:
+
+```bash
+# Basic manual insertion
+python main.py manual-insert -- \
+    --config manual_insert_config.yaml \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4
+
+# With custom temporary directory
+python main.py manual-insert -- \
+    --config manual_insert_config.yaml \
+    --input-video outputs/video_merge/final_video.mp4 \
+    --output outputs/manual_insert/final_video_manual.mp4 \
+    --temp-dir /tmp/manual_insert
+```
+
+#### 8.5 Configuration Options
+
+**Position Specifications:**
+- **Presets**: `"top-left"`, `"top-center"`, `"top-right"`, `"center-left"`, `"center"`, `"center-right"`, `"bottom-left"`, `"bottom-center"`, `"bottom-right"`
+- **Percentage (center-based)**: `"50%,25%"` (50% from left edge, 25% from top edge - specifies center point)
+- **Pixels (center-based)**: `"100,50"` (center point at 100px from left, 50px from top)
+
+**Important:** Position coordinates specify the CENTER POINT of the inserted video, not the top-left corner. This is consistent with the video-merge module behavior.
+
+**Size Specifications:**
+- **Percentage**: `"25%"` (25% of main video width, maintains aspect ratio)
+- **Explicit**: `"320x240"` (specific pixel dimensions)
+- **Decimal**: `"0.25"` (same as "25%")
+
+**Time Format Support:**
+- **MM:SS.ms**: `"01:23.45"` (1 minute, 23.45 seconds)
+- **HH:MM:SS.ms**: `"01:23:45.67"` (1 hour, 23 minutes, 45.67 seconds)
+- **Seconds**: `"83.45"` (83.45 seconds)
+
+**Audio Mix Modes:**
+- **`"overlay"`**: Mix with original audio (default)
+- **`"replace"`**: Replace original audio during the specified time period
+
+#### 8.6 Advanced Usage Examples
+
+**Multiple Videos at Different Positions (Configuration File):**
+```yaml
+video_inserts:
+  - time: "00:10.00"
+    videos:
+      - source: "chart1.mp4"
+        start: "00:00.00"
+        duration: "00:05.00"
+        position: "top-left"
+        size: "30%"
+        loop: true
+      - source: "chart2.mp4"
+        start: "00:00.00"
+        duration: "00:05.00"
+        position: "top-right"
+        size: "30%"
+        loop: true
+      - source: "logo.mp4"
+        start: "00:00.00"
+        duration: "00:05.00"
+        position: "bottom-right"
+        size: "15%"
+        loop: false
+```
+
+**Sequential Command Line Insertions:**
+```bash
+# First insertion - add chart at 5 seconds
+python main.py manual-insert -- \
+    --input-video main_video.mp4 \
+    --output temp_video1.mp4 \
+    --add-video chart.mp4 \
+    --insert-time "00:05.00" \
+    --position "top-left" \
+    --size "30%"
+
+# Second insertion - add logo to the result
+python main.py manual-insert -- \
+    --input-video temp_video1.mp4 \
+    --output temp_video2.mp4 \
+    --add-video logo.mp4 \
+    --insert-time "00:10.00" \
+    --position "bottom-right" \
+    --size "15%"
+
+# Third insertion - add background music
+python main.py manual-insert -- \
+    --input-video temp_video2.mp4 \
+    --output final_video.mp4 \
+    --add-audio background.mp3 \
+    --audio-time "00:00.00" \
+    --audio-duration "00:30.00" \
+    --volume 0.3
+```
+
+**Audio-Only Configuration:**
+```yaml
+# No video insertions, only audio
+audio_inserts:
+  - time: "00:00.00"
+    source: "intro_music.mp3"
+    start: "00:00.00"
+    duration: "00:05.00"
+    volume: 0.4
+    mix_mode: "overlay"
+  - time: "01:30.00"
+    source: "outro_music.mp3"
+    start: "00:00.00"
+    duration: "00:08.00"
+    volume: 0.3
+    mix_mode: "overlay"
+```
+
+**Command Line Audio-Only Example:**
+```bash
+# Add intro music
+python main.py manual-insert -- \
+    --input-video main_video.mp4 \
+    --output result_with_intro.mp4 \
+    --add-audio intro_music.mp3 \
+    --audio-time "00:00.00" \
+    --audio-duration "00:05.00" \
+    --volume 0.4
+
+# Add outro music to the result (sequential processing)
+python main.py manual-insert -- \
+    --input-video result_with_intro.mp4 \
+    --output final_result.mp4 \
+    --add-audio outro_music.mp3 \
+    --audio-time "01:30.00" \
+    --audio-duration "00:08.00" \
+    --volume 0.3
+```
+
+**Video-Only Configuration:**
+```yaml
+# No audio insertions, only video
+video_inserts:
+  - time: "00:05.00"
+    videos:
+      - source: "data_visualization.mp4"
+        start: "00:00.00"
+        duration: "00:10.00"
+        position: "center"
+        size: "50%"
+        loop: false
+```
+
+**Command Line vs Configuration File Comparison:**
+
+*For single insertions:* Command line is faster and more direct
+```bash
+# Quick single insertion
+python main.py manual-insert -- --input-video main.mp4 --output result.mp4 --add-video overlay.mp4 --insert-time "00:05.00"
+```
+
+*For multiple insertions:* Configuration file is more organized
+```yaml
+# Complex multi-insertion setup
+video_inserts:
+  - time: "00:05.00"
+    videos: [...]
+  - time: "00:15.00"
+    videos: [...]
+audio_inserts:
+  - time: "00:00.00"
+    source: "background.mp3"
+    # ... more parameters
+```
+
+#### 8.7 Performance and Quality Tips
+
+**For High-Quality Output:**
+- Use high-resolution source videos
+- Ensure source videos have consistent frame rates
+- Use lossless audio formats when possible
+
+**For Better Performance:**
+- Keep video clips reasonably short (under 30 seconds)
+- Use MP4 format for video sources
+- Use WAV or MP3 format for audio sources
+- Specify a fast SSD for temporary directory
+
+**Command Line Best Practices:**
+- Use sequential insertions for multiple modifications to avoid complex temporary configurations
+- Test with shorter clips first to verify positioning and timing
+- Use absolute paths for source files to avoid path resolution issues
+- Specify custom temp directory on fastest available drive for large videos
+
+**Configuration File vs Command Line:**
+- **Use command line for**: Quick single insertions, testing, iterative adjustments
+- **Use configuration file for**: Complex multi-insertion projects, batch processing, repeatable workflows
+
+**Memory Management:**
+- The system automatically handles temporary files
+- Large videos may require substantial disk space
+- Monitor disk usage during processing
+
+**Examples of Efficient Workflows:**
+
+*Testing Workflow (Command Line):*
+```bash
+# Quick test with short duration
+python main.py manual-insert -- \
+    --input-video test_video.mp4 \
+    --output test_result.mp4 \
+    --add-video overlay.mp4 \
+    --insert-time "00:05.00" \
+    --clip-duration "00:01.00" \
+    --size "20%"
+
+# Adjust and re-test
+python main.py manual-insert -- \
+    --input-video test_video.mp4 \
+    --output test_result2.mp4 \
+    --add-video overlay.mp4 \
+    --insert-time "00:05.00" \
+    --clip-duration "00:03.00" \
+    --size "30%" \
+    --position "top-left"
+```
+
+*Production Workflow (Configuration File):*
+```bash
+# Use comprehensive YAML configuration for final production
+python main.py manual-insert -- \
+    --config production_config.yaml \
+    --input-video main_video.mp4 \
+    --output final_production.mp4 \
+    --temp-dir /fast_ssd/temp
+```
+
+**Prerequisites:**
+- **Main video file** (MP4 format recommended)
+- **Source video/audio files** for insertion
+- **FFmpeg** with video and audio support
+- **YAML configuration file** defining insertions
+- **Sufficient disk space** for temporary files
+
+**Output:**
+- **Final composed video** with all specified insertions
+- **Automatic cleanup** of temporary files
+- **Preservation** of original video quality where possible
+
+**Common Use Cases:**
+
+1. **Financial Reports**: 
+   - *Configuration*: Insert charts, graphs, and market data visualizations
+   - *Command Line*: Quick chart overlay during market updates
+   ```bash
+   python main.py manual-insert -- --input-video market_report.mp4 --output updated_report.mp4 --add-video live_chart.mp4 --insert-time "00:30.00"
+   ```
+
+2. **Educational Content**: 
+   - *Configuration*: Add supplementary videos and background music
+   - *Command Line*: Insert explanation diagrams or background audio
+   ```bash
+   python main.py manual-insert -- --input-video lecture.mp4 --output enhanced_lecture.mp4 --add-video diagram.mp4 --insert-time "00:45.00" --position "top-right"
+   ```
+
+3. **Presentations**: 
+   - *Configuration*: Overlay logos, watermarks, and supporting media
+   - *Command Line*: Quick logo or watermark addition
+   ```bash
+   python main.py manual-insert -- --input-video presentation.mp4 --output branded_presentation.mp4 --add-video logo.mp4 --insert-time "00:00.00" --size "15%" --position "bottom-right"
+   ```
+
+4. **News Content**: 
+   - *Configuration*: Insert relevant footage and audio commentary
+   - *Command Line*: Add breaking news footage or live updates
+   ```bash
+   python main.py manual-insert -- --input-video news_base.mp4 --output breaking_news.mp4 --add-video footage.mp4 --insert-time "01:30.00" --add-audio commentary.mp3 --audio-time "01:30.00"
+   ```
+
+5. **Marketing Videos**: 
+   - *Configuration*: Add product demonstrations and background audio
+   - *Command Line*: Quick product showcase insertion
+   ```bash
+   python main.py manual-insert -- --input-video marketing_base.mp4 --output product_showcase.mp4 --add-video product_demo.mp4 --insert-time "00:15.00" --size "40%"
+   ```
+
+
 ## Configuration Files
 
 ### Environment Variables for Azure Speech Service
@@ -717,7 +1372,72 @@ SENTENCE_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"     # video_vectorizer.
 
 ### Common Issues and Solutions
 
-#### 1. Module Not Found Errors
+#### 0. Semantic Matching Quality Issues (Latest Updates)
+
+**Symptoms:**
+- Videos matching non-adjacent sentences 
+- Poor narrative flow in video composition
+- Low-quality or irrelevant video matches
+- Suggested insert time fields in output
+
+**Solutions:**
+```bash
+# Use adjacent-only grouping with quality control
+python main.py data-match -- --file script.txt --similarity-threshold 0.6 --distance-threshold 1.5
+
+# Stricter similarity for better grouping
+python main.py data-match -- --file script.txt --similarity-threshold 0.7
+
+# Filter out poor video matches
+python main.py data-match -- --file script.txt --distance-threshold 1.0
+
+# Debug mode to see similarity scores
+python main.py data-match -- --text "your text" --similarity-threshold 0.4
+```
+
+**Parameter Tuning:**
+- `--similarity-threshold 0.3-0.4`: More permissive grouping
+- `--similarity-threshold 0.6-0.8`: Stricter grouping (better coherence)
+- `--distance-threshold 1.0-1.5`: High-quality matches only
+- `--distance-threshold 2.0-3.0`: More permissive matching
+
+#### 1. Manual Video Insertion Issues (Latest Updates)
+
+**Symptoms:**
+- Position coordinates behaving differently from video-merge module
+- No progress indication during long processing operations  
+- Inserted videos showing only static frames instead of animation
+- Unclear processing status and completion time
+
+**Solutions:**
+```bash
+# All position coordinates now use center-based positioning
+python main.py manual-insert -- \
+    --input-video main.mp4 \
+    --output result.mp4 \
+    --add-video overlay.mp4 \
+    --insert-time "00:05.00" \
+    --position "75%,50%"  # Center point at 75% width, 50% height
+
+# Progress monitoring is now automatic during processing
+# Look for real-time progress updates like:
+# "Preparing clip: 00:01.23"
+# "Progress: 00:02.45"
+# "Video insertion completed successfully!"
+```
+
+**Position Coordinate System:**
+- `"50%,50%"`: Center of screen (center point of inserted video)
+- `"75%,25%"`: Upper right area (center point of inserted video)
+- `"25%,75%"`: Lower left area (center point of inserted video)
+
+**Progress Monitoring Features:**
+- Real-time clip preparation progress
+- Video insertion progress with timestamps
+- Clear completion status messages
+- Error reporting with specific details
+
+#### 2. Module Not Found Errors
 ```bash
 # Ensure you're in the correct directory
 cd /path/to/work_code
@@ -756,6 +1476,18 @@ curl -I https://pixabay.com/api/videos/
 **API Limits:**
 - Free tier: 20,000 requests/month
 - Rate limit: 3 requests/minute
+- Minimum `per_page`: 3 videos (API requirement)
+
+**Common Errors:**
+- `[ERROR 400] "per_page" is out of valid range`: Fixed in latest version for small downloads
+- `401 Unauthorized`: Invalid API key
+- `429 Too Many Requests`: Rate limit exceeded
+
+**Small Download Workaround (if using older version):**
+```bash
+# For 1-2 videos, request 3 and the system will limit results
+python main.py data-collect university 3  # Downloads 3, you can delete extras
+```
 
 #### 4. Video Processing Memory Issues
 
@@ -851,7 +1583,11 @@ python main.py data-collect business 15 &
 # Pre-create vector indexes for faster matching
 python main.py video-vectorize -- --batch-size 64
 
-# Use appropriate distance thresholds
+# Use appropriate similarity and distance thresholds for quality control
+python main.py data-match -- --file script.txt --similarity-threshold 0.6 --distance-threshold 1.5  # Balanced quality
+python main.py data-match -- --file script.txt --similarity-threshold 0.4 --distance-threshold 2.5  # More permissive
+
+# Optimize video composition with quality filtering
 python main.py video-merge -- [...] --distance-threshold 1.5  # Stricter matching
 python main.py video-merge -- [...] --distance-threshold 3.0  # More permissive
 ```
@@ -961,4 +1697,3 @@ python test_system.py
 - [OpenCV Tutorials](https://docs.opencv.org/master/d9/df8/tutorial_root.html)
 
 For issues and questions, please check the troubleshooting section above or create an issue in the project repository.
-

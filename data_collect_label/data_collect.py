@@ -32,7 +32,8 @@ class PixabayVideoDownloader:
         print(f"Searching for '{self.search_term}' videos on Pixabay...")
         
         # Calculate how many pages we need to fetch
-        videos_per_page = min(200, self.num_videos)  # Maximum 200 per page as per API docs
+        # Pixabay API requires minimum 3 for per_page parameter
+        videos_per_page = min(200, max(3, self.num_videos))  # Minimum 3, maximum 200 per page
         pages_needed = (self.num_videos + videos_per_page - 1) // videos_per_page
         
         all_videos = []

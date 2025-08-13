@@ -15,6 +15,8 @@ Available modules:
 6. video-merge-simple: Compose final video with MoviePy (simple & auto-download)
 7. auto-caption: Add captions to videos using OpenCV GPU acceleration
 8. auto-caption-ffmpeg: Add captions to videos using FFmpeg
+9. manual-insert: Manually insert videos and audio clips with user configuration
+9. manual-insert: Manually insert videos and audio clips with user configuration
 
 Usage:
     python main.py <module> [arguments...]
@@ -31,6 +33,8 @@ Examples:
     python main.py video-merge-simple -- --json outputs/data_match/matches.json --transcript outputs/tts/script/script.txt --input-video main.mp4 --audio outputs/tts/script/script.wav
     python main.py auto-caption -- --input-video outputs/merge_video.mp4 --script outputs/tts/script/script.txt
     python main.py auto-caption-ffmpeg -- --input-video outputs/merge_video.mp4 --script outputs/tts/script/script.txt --font-size 28
+    python main.py manual-insert -- --show-recommendations outputs/data_match/matches.json
+    python main.py manual-insert -- --config manual_config.yaml --input-video main.mp4 --output final.mp4
     
     # Using positional arguments (no -- separator needed)
     python main.py data-collect finance 10
@@ -93,6 +97,11 @@ class VideoProductionSystem:
                 'name': 'Auto Caption (FFmpeg)',
                 'path': self.base_dir / 'auto_caption' / 'caption_generator_ffmpeg.py',
                 'description': 'Add captions to videos using FFmpeg'
+            },
+            'manual-insert': {
+                'name': 'Manual Video/Audio Insert',
+                'path': self.base_dir / 'manual_insert' / 'manual_inserter.py',
+                'description': 'Manually insert videos and audio clips with user configuration'
             }
         }
     
@@ -147,6 +156,14 @@ class VideoProductionSystem:
                 output_dir = outputs_dir / 'auto_caption'
                 output_dir.mkdir(exist_ok=True)
                 output_file = output_dir / 'final_video_ffmpeg.mp4'
+                args.extend(['--output', str(output_file)])
+                print(f"Using default output: {output_file}")
+        
+        elif module_name == 'manual-insert':
+            if '--output' not in args and '--show-recommendations' not in args:
+                output_dir = outputs_dir / 'manual_insert'
+                output_dir.mkdir(exist_ok=True)
+                output_file = output_dir / 'final_video_manual.mp4'
                 args.extend(['--output', str(output_file)])
                 print(f"Using default output: {output_file}")
         

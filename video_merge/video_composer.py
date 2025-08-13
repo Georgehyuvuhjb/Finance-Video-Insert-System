@@ -113,7 +113,30 @@ class PyTorchVideoProcessor:
         overlay_frames, _, overlay_h, overlay_w = overlay_batch.shape
         x, y = position
         
-        # Make sure position is valid
+        # Calculate the maximum overlay size that fits within bounds
+        max_overlay_w = main_w - x if x < main_w else 0
+        max_overlay_h = main_h - y if y < main_h else 0
+        
+        # If overlay is too large or position is invalid, resize it
+        if overlay_w > max_overlay_w or overlay_h > max_overlay_h or max_overlay_w <= 0 or max_overlay_h <= 0:
+            # Calculate target size maintaining aspect ratio
+            aspect_ratio = overlay_w / overlay_h if overlay_h > 0 else 1.0
+            
+            if max_overlay_w <= 0 or max_overlay_h <= 0:
+                return main_batch
+            
+            # Fit overlay within available space
+            if max_overlay_w / aspect_ratio <= max_overlay_h:
+                target_w = max_overlay_w
+                target_h = int(max_overlay_w / aspect_ratio)
+            else:
+                target_h = max_overlay_h
+                target_w = int(max_overlay_h * aspect_ratio)
+            
+            overlay_batch = self.resize_batch(overlay_batch, (target_h, target_w))
+            overlay_h, overlay_w = target_h, target_w
+        
+        # Make sure position is valid after resizing
         x = max(0, min(x, main_w - overlay_w))
         y = max(0, min(y, main_h - overlay_h))
         
@@ -183,7 +206,19 @@ class PyTorchVideoComposer:
         
         # Load matched videos data
         with open(json_input, 'r', encoding='utf-8') as f:
-            self.matched_data = json.load(f)
+            json_data = json.load(f)
+            
+            # Handle both old and new JSON formats
+            if isinstance(json_data, dict) and "sentence_groups" in json_data:
+                # New format with sentence_groups wrapper
+                self.matched_data = json_data["sentence_groups"]
+                print("Detected new JSON format (sentence_groups)")
+            elif isinstance(json_data, list):
+                # Old format - direct array
+                self.matched_data = json_data
+                print("Detected old JSON format (direct array)")
+            else:
+                raise ValueError("Unknown JSON format")
         
         # Load transcript data
         self.transcript = self.load_transcript(transcript_file)
@@ -267,63 +302,75 @@ class PyTorchVideoComposer:
         if not size_str:
             target_width = int(main_width * 0.25)
             target_height = int(target_width / aspect_ratio)
-            return target_width, target_height
         
-        size_str = size_str.strip()
-        
-        # Handle percentage of main video width (e.g. "25%")
-        if size_str.endswith("%") and not any(x in size_str for x in ['w', 'h', 'x']):
-            percent = float(size_str.rstrip("%")) / 100
-            target_width = int(main_width * percent)
-            target_height = int(target_width / aspect_ratio)
-            return target_width, target_height
-        
-        # Handle width specification (e.g. "320px" or "30%w")
-        elif any(x in size_str for x in ['w', 'px']) and 'h' not in size_str:
-            if 'w' in size_str:
-                # Percentage of main width
-                size_str = size_str.rstrip('w')
-                if size_str.endswith("%"):
-                    percent = float(size_str.rstrip("%")) / 100
-                    target_width = int(main_width * percent)
-                else:
-                    target_width = int(size_str)
-            else:
-                # Absolute pixels
-                size_str = size_str.rstrip('px')
-                target_width = int(size_str)
-                
-            target_height = int(target_width / aspect_ratio)
-            return target_width, target_height
-        
-        # Handle height specification (e.g. "240px-h" or "20%h")
-        elif 'h' in size_str:
-            size_str = size_str.rstrip('h').rstrip('-')
-            if size_str.endswith("%"):
-                # Percentage of main height
-                percent = float(size_str.rstrip("%")) / 100
-                target_height = int(main_height * percent)
-            else:
-                # Absolute pixels
-                size_str = size_str.rstrip('px')
-                target_height = int(size_str)
-                
-            target_width = int(target_height * aspect_ratio)
-            return target_width, target_height
-        
-        # Handle absolute size (fallback)
         else:
-            try:
-                # Try parsing as a simple number (treated as width)
-                target_width = int(size_str)
+            size_str = size_str.strip()
+            
+            # Handle percentage of main video width (e.g. "25%")
+            if size_str.endswith("%") and not any(x in size_str for x in ['w', 'h', 'x']):
+                percent = float(size_str.rstrip("%")) / 100
+                target_width = int(main_width * percent)
                 target_height = int(target_width / aspect_ratio)
-                return target_width, target_height
-            except ValueError:
-                # Default if parsing fails
-                print(f"Could not parse size '{size_str}', using default (25% of width)")
-                target_width = int(main_width * 0.25)
+            
+            # Handle width specification (e.g. "320px" or "30%w")
+            elif any(x in size_str for x in ['w', 'px']) and 'h' not in size_str:
+                if 'w' in size_str:
+                    # Percentage of main width
+                    size_str = size_str.rstrip('w')
+                    if size_str.endswith("%"):
+                        percent = float(size_str.rstrip("%")) / 100
+                        target_width = int(main_width * percent)
+                    else:
+                        target_width = int(size_str)
+                else:
+                    # Absolute pixels
+                    size_str = size_str.rstrip('px')
+                    target_width = int(size_str)
+                    
                 target_height = int(target_width / aspect_ratio)
-                return target_width, target_height
+            
+            # Handle height specification (e.g. "240px-h" or "20%h")
+            elif 'h' in size_str:
+                size_str = size_str.rstrip('h').rstrip('-')
+                if size_str.endswith("%"):
+                    # Percentage of main height
+                    percent = float(size_str.rstrip("%")) / 100
+                    target_height = int(main_height * percent)
+                else:
+                    # Absolute pixels
+                    size_str = size_str.rstrip('px')
+                    target_height = int(size_str)
+                    
+                target_width = int(target_height * aspect_ratio)
+            
+            # Handle absolute size (fallback)
+            else:
+                try:
+                    # Try parsing as a simple number (treated as width)
+                    target_width = int(size_str)
+                    target_height = int(target_width / aspect_ratio)
+                except ValueError:
+                    # Default if parsing fails
+                    print(f"Could not parse size '{size_str}', using default (25% of width)")
+                    target_width = int(main_width * 0.25)
+                    target_height = int(target_width / aspect_ratio)
+        
+        # CRITICAL: Ensure overlay fits within main video bounds
+        if target_width > main_width:
+            # Scale down to fit width
+            target_width = main_width
+            target_height = int(target_width / aspect_ratio)
+        
+        if target_height > main_height:
+            # Scale down to fit height  
+            target_height = main_height
+            target_width = int(target_height * aspect_ratio)
+        
+        # Ensure minimum size
+        target_width = max(1, target_width)
+        target_height = max(1, target_height)
+        
+        return target_width, target_height
     
     def find_videos(self):
         """Find pre-downloaded videos that match the required IDs"""
@@ -351,14 +398,21 @@ class PyTorchVideoComposer:
         
         for group in tqdm(self.matched_data, desc="Finding matching videos"):
             # Get videos that meet the distance threshold
-            videos = group["matching_videos"]
+            # Handle both old and new field names
+            if "recommended_videos" in group:
+                videos = group["recommended_videos"]  # New format
+            else:
+                videos = group["matching_videos"]     # Old format
             eligible_videos = [v for v in videos if v["distance"] < self.distance_threshold]
-            
+
             if not eligible_videos:
-                print(f"No eligible videos found for sentence: {group['sentence_group']['sentences'][0][:30]}...")
-                continue
-            
-            # Try each eligible video until we find one that exists in our directory
+                # Handle both old and new sentence access patterns
+                if "sentences" in group:
+                    sentence_preview = group["sentences"][0][:30] if group["sentences"] else "Unknown"
+                else:
+                    sentence_preview = group["sentence_group"]["sentences"][0][:30] if group.get("sentence_group", {}).get("sentences") else "Unknown"
+                print(f"No eligible videos found for sentence: {sentence_preview}...")
+                continue            # Try each eligible video until we find one that exists in our directory
             found_match = False
             for video_data in eligible_videos:
                 video_id = str(video_data["video_id"])
@@ -381,7 +435,10 @@ class PyTorchVideoComposer:
                         cap.release()
                         
                         # Calculate segment duration based on text length
-                        text_length = sum(len(s) for s in group["sentence_group"]["sentences"])
+                        if "sentences" in group:
+                            text_length = sum(len(s) for s in group["sentences"])
+                        else:
+                            text_length = sum(len(s) for s in group["sentence_group"]["sentences"])
                         needed_duration = max(3.0, min(15.0, text_length * 0.15))
                         segment_duration = min(needed_duration, duration)
                         
@@ -394,7 +451,7 @@ class PyTorchVideoComposer:
                             "height": height,
                             "fps": fps,
                             "frame_count": frame_count,
-                            "sentence_group": group["sentence_group"],
+                            "sentence_group": group if "sentences" in group else group["sentence_group"],  # Handle both formats
                             "distance": video_data["distance"]
                         })
                         
@@ -404,7 +461,14 @@ class PyTorchVideoComposer:
                         print(f"Error checking video {video_id}: {e}")
             
             if not found_match:
-                print(f"No matching video found in directory for sentence group {group['sentence_group']['start_index']}")
+                # Handle both old and new format for error message
+                if "group_id" in group:
+                    group_id = group["group_id"]
+                elif "start_index" in group:
+                    group_id = group["start_index"]
+                else:
+                    group_id = group.get("sentence_group", {}).get("start_index", "unknown")
+                print(f"No matching video found in directory for sentence group {group_id}")
         
         print(f"Found {len(found_videos)} matching videos in directory")
         return found_videos
@@ -423,7 +487,15 @@ class PyTorchVideoComposer:
         Returns:
             List of matched segments with transcript and video pairs
         """
-        videos.sort(key=lambda x: x["sentence_group"]["start_index"])
+        # Sort videos by group order (handle both old and new formats)
+        def get_sort_key(x):
+            sg = x["sentence_group"]
+            if "group_id" in sg:
+                return sg["group_id"]  # New format
+            else:
+                return sg.get("start_index", 0)  # Old format
+        
+        videos.sort(key=get_sort_key)
         
         matched_segments = []
         
@@ -673,13 +745,18 @@ class PyTorchVideoComposer:
                                 # Stack frames into tensor
                                 overlay_tensor = torch.stack(overlay_frames).to(self.processor.device)
                                 
-                                # Apply overlay
-                                main_portion = self.processor.overlay_batch(
-                                    main_portion, overlay_tensor, position
-                                )
-                                
-                                # Update main batch with overlaid portion
-                                main_batch[batch_start_idx:batch_end_idx] = main_portion
+                                # Apply overlay with better error handling
+                                try:
+                                    main_portion = self.processor.overlay_batch(
+                                        main_portion, overlay_tensor, position
+                                    )
+                                    
+                                    # Update main batch with overlaid portion
+                                    main_batch[batch_start_idx:batch_end_idx] = main_portion
+                                except Exception as overlay_error:
+                                    print(f"Error applying overlay for segment {segment_id}: {overlay_error}")
+                                    print(f"Main portion shape: {main_portion.shape}, Overlay shape: {overlay_tensor.shape}")
+                                    # Continue without overlay for this segment
                                 
                                 # Free memory
                                 del overlay_frames, overlay_tensor
