@@ -186,7 +186,17 @@ class VideoComposer:
         
         # Load matched videos data
         with open(json_input, 'r', encoding='utf-8') as f:
-            self.matched_data = json.load(f)
+            data = json.load(f)
+            
+        # Handle both old and new JSON formats
+        if isinstance(data, dict) and "sentence_groups" in data:
+            # New format with sentence_groups wrapper
+            self.matched_data = data["sentence_groups"]
+        elif isinstance(data, list):
+            # Old format - direct array
+            self.matched_data = data
+        else:
+            raise ValueError(f"Unsupported JSON format in {json_input}")
         
         # Load transcript data
         self.transcript = self.load_transcript(transcript_file)
@@ -236,12 +246,29 @@ class VideoComposer:
         downloaded_videos = []
         
         for group in tqdm(self.matched_data, desc="Downloading videos"):
+            # Handle both old and new JSON formats for video lists
+            if "matching_videos" in group:
+                # Old format
+                videos = group["matching_videos"]
+                sentence_group = group["sentence_group"]
+            elif "recommended_videos" in group:
+                # New format
+                videos = group["recommended_videos"]
+                # In new format, sentences are directly in the group
+                sentence_group = {
+                    "sentences": group["sentences"],
+                    "start_index": group.get("group_id", 0) - 1,  # Convert to 0-based index
+                    "end_index": group.get("group_id", 0) - 1
+                }
+            else:
+                print(f"Warning: No video list found in group: {group}")
+                continue
+                
             # Get top video that meets the distance threshold
-            videos = group["matching_videos"]
             eligible_videos = [v for v in videos if v["distance"] < self.distance_threshold]
             
             if not eligible_videos:
-                print(f"No eligible videos found for sentence: {group['sentence_group']['sentences'][0][:30]}...")
+                print(f"No eligible videos found for sentence: {sentence_group['sentences'][0][:30]}...")
                 continue
             
             # Use the top video
@@ -294,7 +321,7 @@ class VideoComposer:
                     continue
             
             # Calculate segment duration based on text length
-            text_length = sum(len(s) for s in group["sentence_group"]["sentences"])
+            text_length = sum(len(s) for s in sentence_group["sentences"])
             needed_duration = max(3.0, min(15.0, text_length * 0.15))
             
             # Check if the video exists and get properties
@@ -330,7 +357,7 @@ class VideoComposer:
                     "width": width,
                     "height": height,
                     "fps": fps,
-                    "sentence_group": group["sentence_group"],
+                    "sentence_group": sentence_group,
                     "distance": top_video["distance"]
                 })
             except Exception as e:
@@ -369,7 +396,7 @@ class VideoComposer:
                                     "width": width,
                                     "height": height,
                                     "fps": fps,
-                                    "sentence_group": group["sentence_group"],
+                                    "sentence_group": sentence_group,
                                     "distance": top_video["distance"]
                                 })
                                 continue

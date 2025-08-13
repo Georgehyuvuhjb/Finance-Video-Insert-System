@@ -1,0 +1,74 @@
+# Manual Insert Configuration Example
+# ====================================
+# 
+# This file defines manual video and audio insertions for your main video.
+# You can insert multiple videos at the same time point and add audio overlays.
+
+# Video insertions - insert video clips at specific times
+video_inserts:
+  # First insertion at 5 seconds
+  - time: "00:05.00"              # When to insert in main video (MM:SS.ms format)
+    videos:
+      # First video clip
+      - source: "path/to/video1.mp4"     # Path to source video file
+        start: "00:00.00"                # Start time in source video  
+        duration: "00:03.00"             # How long to insert
+        position: "top-left"             # Position: top-left, top-right, bottom-left, bottom-right, center
+        size: "25%"                      # Size as percentage of main video width
+        loop: true                       # Loop if source is shorter than duration
+      
+      # Second video clip (same time, different position)
+      - source: "path/to/video2.mp4"
+        start: "00:02.00"
+        duration: "00:03.00"
+        position: "top-right"
+        size: "25%"
+        loop: false
+  
+  # Second insertion at 15 seconds  
+  - time: "00:15.00"
+    videos:
+      - source: "path/to/video3.mp4"
+        start: "00:00.00"
+        duration: "00:05.00"
+        position: "50%,20%"              # Custom position as percentage (x%, y%)
+        size: "30%"
+        loop: true
+
+# Audio insertions - add audio overlays (optional)
+audio_inserts:
+  # First audio insertion
+  - time: "00:02.00"              # When to start audio in main video
+    source: "path/to/audio1.wav"  # Path to audio file
+    start: "00:00.00"             # Start time in source audio
+    duration: "00:05.00"          # How long to play
+    volume: 0.8                   # Volume level (0.0 to 1.0+)
+    mix_mode: "overlay"           # "overlay" (mix with original) or "replace"
+  
+  # Second audio insertion
+  - time: "00:10.00"
+    source: "path/to/music.mp3"
+    start: "00:30.00"
+    duration: "00:10.00"
+    volume: 0.3
+    mix_mode: "overlay"
+
+# Position Options:
+# - Presets: "top-left", "top-center", "top-right", "center-left", "center", 
+#           "center-right", "bottom-left", "bottom-center", "bottom-right"
+# - Custom: "X%,Y%" (e.g., "50%,25%" for center-horizontal, quarter from top)
+# - Pixels: "100,50" (100 pixels from left, 50 pixels from top)
+
+# Size Options:
+# - Percentage: "25%" (25% of main video width, maintains aspect ratio)
+# - Explicit: "320x240" (specific pixel dimensions)
+# - Decimal: "0.25" (same as "25%")
+
+# Time Format:
+# - MM:SS.ms (e.g., "01:23.45" for 1 minute, 23.45 seconds)
+# - HH:MM:SS.ms (e.g., "01:23:45.67" for 1 hour, 23 minutes, 45.67 seconds)
+# - Seconds: "83.45" (83.45 seconds)
+
+# Audio Mix Modes:
+# - "overlay": Mix with original audio (default)
+# - "replace": Replace original audio during this time period

@@ -403,7 +403,7 @@ def process_videos(videos_dir="videos", metadata_path="outputs/video_metadata.js
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process videos and update tags in metadata database")
-    parser.add_argument("--videos_dir", default="videos",
+    parser.add_argument("--videos_dir", default="outputs/videos",
                       help="Directory containing video files (default: videos)")
     parser.add_argument("--metadata", default="outputs/video_metadata.json",
                       help="Path to metadata JSON file (default: outputs/video_metadata.json)")
