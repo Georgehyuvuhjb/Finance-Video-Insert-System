@@ -14,6 +14,7 @@ DEFAULT_OUTPUT_DIR = Path("output")
 # This list will be populated by the word_boundary_cb function during synthesis.
 sentence_boundaries = []
 
+
 def format_ms_to_mmss(milliseconds_str: str) -> str:
     """
     Helper function to convert a millisecond value (as a string)
@@ -23,16 +24,16 @@ def format_ms_to_mmss(milliseconds_str: str) -> str:
     try:
         # Convert string milliseconds to a float for calculation.
         milliseconds = float(milliseconds_str)
-        
+
         # Calculate total seconds from milliseconds.
         total_seconds = milliseconds / 1000
-        
+
         # Get the whole number of minutes.
         minutes = int(total_seconds // 60)
-        
+
         # Get the remaining seconds (with fractional part).
         seconds = total_seconds % 60
-        
+
         # Format into a "MM:SS.ss" string.
         # MM is zero-padded to 2 digits.
         # SS.ss is zero-padded to 5 characters total (e.g., 07.58).
@@ -41,6 +42,7 @@ def format_ms_to_mmss(milliseconds_str: str) -> str:
         # In case of an error, return a default timestamp.
         return "00:00.00"
 
+
 def word_boundary_cb(evt: speechsdk.SpeechSynthesisWordBoundaryEventArgs):
     """
     Callback function to process word boundary events from the Speech Synthesizer.
@@ -48,14 +50,15 @@ def word_boundary_cb(evt: speechsdk.SpeechSynthesisWordBoundaryEventArgs):
     (like a word or sentence) is detected in the audio stream.
     """
     global sentence_boundaries
-    
+
     if evt.boundary_type == speechsdk.SpeechSynthesisBoundaryType.Sentence:
         # Convert Azure's tick unit (100ns) to milliseconds.
         start_time_ms = (evt.audio_offset + 5000) / 10000
         duration_ms = evt.duration.total_seconds() * 1000
         end_time_ms = start_time_ms + duration_ms
-        
-        print(f"Sentence boundary detected: Text='{evt.text}', Start={start_time_ms:.2f}ms, End={end_time_ms:.2f}ms")
+
+        print(
+            f"Sentence boundary detected: Text='{evt.text}', Start={start_time_ms:.2f}ms, End={end_time_ms:.2f}ms")
 
         # Store the raw millisecond data. Formatting will be done later.
         sentence_boundaries.append({
@@ -64,10 +67,11 @@ def word_boundary_cb(evt: speechsdk.SpeechSynthesisWordBoundaryEventArgs):
             "end_ms": f"{end_time_ms:.2f}"
         })
 
+
 def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR):
     """
     Processes a single text file to generate a WAV audio file and a timestamped text file.
-    
+
     Args:
         input_file_path: Path to the input text file
         output_dir: Directory to save output files (default: DEFAULT_OUTPUT_DIR)
@@ -88,7 +92,7 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
         print("Error: 'SPEECH_KEY' or 'ENDPOINT' environment variables not set.")
         return
 
-    speech_config.speech_synthesis_voice_name='zh-HK-HiuMaanNeural'
+    speech_config.speech_synthesis_voice_name = 'zh-HK-HiuMaanNeural'
 
     speech_config.set_property(
         property_id=speechsdk.PropertyId.SpeechServiceResponse_RequestSentenceBoundary,
@@ -104,7 +108,8 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
 
     # --- 3. Synthesize Speech ---
     audio_config = speechsdk.audio.AudioOutputConfig(filename=wav_output_path)
-    speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+    speech_synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config, audio_config=audio_config)
     speech_synthesizer.synthesis_word_boundary.connect(word_boundary_cb)
 
     with open(input_file_path, 'r', encoding='utf-8') as f:
@@ -117,7 +122,7 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
     # --- 4. Check Result and Write Timestamp File ---
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
         print("Synthesis completed successfully.")
-        
+
         timestamp_txt_path = script_output_dir / f"{input_file_path.stem}.txt"
         print(f"Saving timestamped sentences to: {timestamp_txt_path}")
 
@@ -127,7 +132,7 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
                 # Convert start and end times to the new MM:SS.ss format before writing.
                 start_formatted = format_ms_to_mmss(item['start_ms'])
                 end_formatted = format_ms_to_mmss(item['end_ms'])
-                
+
                 # Format: start_time_end_time_sentence
                 line = f"{start_formatted}_{end_formatted}_{item['text']}\n"
                 f.write(line)
@@ -139,57 +144,61 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
         if cancellation_details.reason == speechsdk.CancellationReason.Error:
             print(f"Error details: {cancellation_details.error_details}")
 
+
 def create_parser():
     """Create command line argument parser"""
     parser = argparse.ArgumentParser(
         description="Text-to-Speech conversion with sentence boundaries",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument(
         '--input', '-i',
         type=str,
         help='Input text file or directory (default: input_text/)'
     )
-    
+
     parser.add_argument(
         '--output', '-o',
         type=str,
         default=str(DEFAULT_OUTPUT_DIR),
         help=f'Output directory (default: {DEFAULT_OUTPUT_DIR})'
     )
-    
+
     return parser
+
 
 if __name__ == "__main__":
     print("DEBUG: TTS module started")
     print(f"DEBUG: __name__ = {__name__}")
     print(f"DEBUG: sys.argv = {sys.argv}")
-    
+
     parser = create_parser()
     args = parser.parse_args()
-    print(f"DEBUG: Parsed arguments - input: {args.input}, output: {args.output}")
-    
+    print(
+        f"DEBUG: Parsed arguments - input: {args.input}, output: {args.output}")
+
     # Determine input and output paths
     if args.input:
         input_path = Path(args.input)
     else:
         input_path = DEFAULT_INPUT_DIR
-    
+
     output_dir = Path(args.output)
     output_dir.mkdir(exist_ok=True)
-    
+
     print(f"DEBUG: Input path: {input_path}")
     print(f"DEBUG: Output directory: {output_dir}")
     print(f"DEBUG: Input path exists: {input_path.exists()}")
-    print(f"DEBUG: Input path is file: {input_path.is_file() if input_path.exists() else 'N/A'}")
-    
+    print(
+        f"DEBUG: Input path is file: {input_path.is_file() if input_path.exists() else 'N/A'}")
+
     # Check for required environment variables
     speech_key = os.environ.get('SPEECH_KEY')
     endpoint = os.environ.get('ENDPOINT')
     print(f"DEBUG: SPEECH_KEY set: {'Yes' if speech_key else 'No'}")
     print(f"DEBUG: ENDPOINT set: {'Yes' if endpoint else 'No'}")
-    
+
     if not speech_key or not endpoint:
         print("Critical Error: Please set 'SPEECH_KEY' and 'ENDPOINT' environment variables before running.")
         print(f"SPEECH_KEY: {'SET' if speech_key else 'NOT SET'}")
@@ -197,7 +206,7 @@ if __name__ == "__main__":
         exit(1)
 
     print("Starting TTS processing...")
-    
+
     # Process input
     if input_path.is_file() and input_path.suffix == '.txt':
         # Process single file
@@ -214,7 +223,8 @@ if __name__ == "__main__":
         if not text_files:
             print(f"No .txt files found in '{input_path}'.")
         else:
-            print(f"Processing {len(text_files)} files from directory: {input_path}")
+            print(
+                f"Processing {len(text_files)} files from directory: {input_path}")
             for txt_file in text_files:
                 try:
                     process_script(txt_file, output_dir)
@@ -224,7 +234,8 @@ if __name__ == "__main__":
                     import traceback
                     traceback.print_exc()
     else:
-        print(f"Error: Input path '{input_path}' is not a valid file or directory.")
+        print(
+            f"Error: Input path '{input_path}' is not a valid file or directory.")
         print(f"Current working directory: {Path.cwd()}")
         print(f"Files in current directory: {list(Path.cwd().glob('*'))}")
         exit(1)
