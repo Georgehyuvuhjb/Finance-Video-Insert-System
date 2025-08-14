@@ -9,9 +9,8 @@ Supports the format: 00:00.05_00:10.68_text_content
 This module is shared between OpenCV and FFmpeg caption generators.
 """
 
-import re
 import os
-from typing import List, Tuple, Dict
+from typing import List, Dict
 from dataclasses import dataclass
 
 

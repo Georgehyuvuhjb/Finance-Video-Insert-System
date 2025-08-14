@@ -8,7 +8,6 @@ Uses multiple sources for reliability.
 """
 
 import os
-import sys
 import urllib.request
 import shutil
 import subprocess
@@ -16,7 +15,6 @@ from pathlib import Path
 import tempfile
 import zipfile
 import platform
-import time
 
 
 def download_file(url, destination, timeout=60):

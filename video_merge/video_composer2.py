@@ -5,8 +5,7 @@ import subprocess
 import re
 import tempfile
 from tqdm import tqdm
-import cv2
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, CompositeVideoClip
 
 
 def parse_position(position_str, main_width, main_height, overlay_width, overlay_height):

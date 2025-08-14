@@ -12,18 +12,15 @@ Features:
 - Batch processing for memory efficiency
 """
 
-import cv2
-import numpy as np
 import argparse
 import os
 import sys
 import time
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Optional
-from pathlib import Path
-import psutil
+from typing import List, Optional
 import gc
+import psutil
+import cv2
+import numpy as np
 
 # PIL for high-quality text rendering
 from PIL import Image, ImageDraw, ImageFont, ImageFilter

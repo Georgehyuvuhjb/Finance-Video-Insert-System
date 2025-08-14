@@ -7,10 +7,8 @@ This tool helps you set up and manage API keys and configuration files.
 """
 
 import os
-import sys
-import yaml
-import json
 from pathlib import Path
+import yaml
 
 
 class ConfigManager:

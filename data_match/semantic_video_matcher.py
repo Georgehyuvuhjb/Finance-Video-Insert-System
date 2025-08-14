@@ -1,10 +1,9 @@
 import json
-import faiss
-import pickle
 import argparse
 import os
-import numpy as np
 import re
+import faiss
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 

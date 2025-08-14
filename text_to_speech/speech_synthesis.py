@@ -1,9 +1,10 @@
 import os
 import sys
-import azure.cognitiveservices.speech as speechsdk
 from pathlib import Path
 import time
 import argparse
+import azure.cognitiveservices.speech as speechsdk
+
 
 # --- Configuration ---
 # Default directories for input and output files.

@@ -1,10 +1,10 @@
 import os
 import json
-import cv2
-import torch
 import argparse
 import glob
 from PIL import Image
+import cv2
+import torch
 from transformers import MllamaForConditionalGeneration, MllamaProcessor
 
 

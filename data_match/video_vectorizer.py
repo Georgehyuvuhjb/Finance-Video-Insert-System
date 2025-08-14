@@ -1,13 +1,13 @@
 # video_vectorizer.py
 
 import json
-import numpy as np
 import os
 import time
-from sentence_transformers import SentenceTransformer
-import faiss
 import pickle
 import argparse
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
 
 
 def create_video_vectors(metadata_path, output_dir="outputs/vectors", model_name="paraphrase-multilingual-MiniLM-L12-v2", batch_size=32):

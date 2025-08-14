@@ -1,9 +1,9 @@
 import os
 import time
 import json
-import requests
 import sys
 import argparse
+import requests
 import yaml
 
 
