@@ -189,6 +189,77 @@ class PyTorchVideoProcessor:
             if out.isOpened():
                 out.release()
     
+    def _process_video_full_load(self, main_video_path, overlay_configs, output_path):
+        """
+        原有的全量處理方法，完整載入視頻進行處理
+        
+        Args:
+            main_video_path: 主影片路徑
+            overlay_configs: 覆蓋配置列表
+            output_path: 輸出路徑
+            
+        Returns:
+            bool: 處理是否成功
+        """
+        try:
+            print("🔄 Using full video loading method...")
+            
+            # 讀取主影片
+            main_cap = cv2.VideoCapture(main_video_path)
+            if not main_cap.isOpened():
+                print(f"Error: Cannot open main video {main_video_path}")
+                return False
+            
+            fps = main_cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(main_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(main_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(main_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            # 讀取所有主影片幀
+            print(f"Loading all {total_frames} frames into memory...")
+            main_frames = []
+            for i in range(total_frames):
+                ret, frame = main_cap.read()
+                if not ret:
+                    break
+                main_frames.append(frame)
+            
+            main_cap.release()
+            
+            # 處理每個覆蓋配置
+            for config in overlay_configs:
+                overlay_path = config.get("overlay_video")
+                position = config.get("position", "center")
+                start_time = config.get("start_time", "00:00:00")
+                duration = config.get("duration", "00:00:10")
+                size = config.get("size")
+                
+                # 讀取覆蓋影片
+                start_seconds = self.parse_time_to_seconds(start_time) if isinstance(start_time, str) else start_time
+                duration_seconds = self.parse_time_to_seconds(duration) if isinstance(duration, str) else duration
+                overlay_frames = self.read_video_frames(overlay_path, start_seconds, duration_seconds)
+                if not overlay_frames:
+                    print(f"Failed to read overlay video: {overlay_path}")
+                    continue
+                
+                # 執行覆蓋
+                main_frames = self.overlay_frames(main_frames, overlay_frames, position, start_time, duration, fps)
+            
+            # 寫入輸出視頻
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            
+            for frame in main_frames:
+                out.write(frame)
+            
+            out.release()
+            print("✅ Full video processing completed!")
+            return True
+            
+        except Exception as e:
+            print(f"Error in full video processing: {e}")
+            return False
+
     def _add_audio_to_video(self, original_video_path, processed_video_path, output_path):
         """
         使用 FFmpeg 將原音頻添加到處理後的視頻，如果 FFmpeg 不可用則提供替代方案
@@ -1027,6 +1098,97 @@ class ManualVideoInserter:
             print(f"Warning: Could not parse time '{time_str}': {e}")
             return 0.0
     
+    def _process_audio_insertions(self, video_path, audio_inserts):
+        """处理音频插入操作"""
+        import subprocess
+        import tempfile
+        import os
+        
+        temp_dir = tempfile.mkdtemp()
+        current_video = video_path
+        
+        try:
+            for i, audio_insert in enumerate(audio_inserts):
+                source = audio_insert.get('source', '')
+                insert_time = audio_insert.get('time', '00:00.00')
+                audio_start = audio_insert.get('start', '00:00.00')
+                duration = audio_insert.get('duration', '00:05.00')
+                volume = audio_insert.get('volume', 1.0)
+                mix_mode = audio_insert.get('mix_mode', 'overlay')
+                
+                if not os.path.exists(source):
+                    print(f"⚠️ Audio file not found: {source}")
+                    continue
+                
+                # 准备输出文件
+                temp_output = os.path.join(temp_dir, f"temp_audio_{i}.mp4")
+                
+                # 转换时间格式
+                insert_seconds = self.parse_time_to_seconds(insert_time)
+                audio_start_seconds = self.parse_time_to_seconds(audio_start)
+                duration_seconds = self.parse_time_to_seconds(duration)
+                
+                print(f"   🎵 Adding audio: {os.path.basename(source)} at {insert_time} (mode: {mix_mode})")
+                
+                if mix_mode == 'replace':
+                    # Replace mode: Mute original audio during the specified duration and add new audio
+                    end_seconds = insert_seconds + duration_seconds
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', current_video,
+                        '-i', source,
+                        '-filter_complex',
+                        f'[0:a]volume=enable=\'between(t,{insert_seconds},{end_seconds})\':volume=0[muted];'
+                        f'[1:a]atrim=start={audio_start_seconds}:duration={duration_seconds},volume={volume}[trimmed];'
+                        f'[trimmed]adelay={insert_seconds*1000}|{insert_seconds*1000}[delayed];'
+                        f'[muted][delayed]amix=inputs=2:duration=longest[mixed]',
+                        '-map', '0:v', '-map', '[mixed]',
+                        '-c:v', 'copy', '-c:a', 'aac',
+                        temp_output
+                    ]
+                else:
+                    # Overlay mode: mix with original audio
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', current_video,
+                        '-i', source,
+                        '-filter_complex',
+                        f'[1:a]atrim=start={audio_start_seconds}:duration={duration_seconds}[trimmed];'
+                        f'[trimmed]adelay={insert_seconds*1000}|{insert_seconds*1000},volume={volume}[delayed];'
+                        f'[0:a][delayed]amix=inputs=2:duration=longest[mixed]',
+                        '-map', '0:v', '-map', '[mixed]',
+                        '-c:v', 'copy', '-c:a', 'aac',
+                        temp_output
+                    ]
+                
+                # 执行FFmpeg命令
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    current_video = temp_output
+                    print(f"   ✅ Audio processed successfully")
+                else:
+                    print(f"   ❌ Audio processing failed: {result.stderr}")
+                    continue
+            
+            # 复制最终结果到目标位置
+            if current_video != video_path:
+                import shutil
+                shutil.copy2(current_video, video_path)
+                print(f"✅ Final video with audio saved to: {video_path}")
+            
+            return video_path
+            
+        except Exception as e:
+            print(f"❌ Audio processing error: {e}")
+            return video_path
+        finally:
+            # 清理临时文件
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+
     def seconds_to_time_str(self, seconds):
         """
         Convert seconds to MM:SS.ms format
@@ -1046,7 +1208,7 @@ class ManualVideoInserter:
     
     def load_config(self, config_path):
         """
-        Load configuration from YAML file
+        Load configuration from YAML file with processing settings support
         
         Args:
             config_path (str): Path to configuration file
@@ -1058,6 +1220,25 @@ class ManualVideoInserter:
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
                 print(f"Loaded configuration from {config_path}")
+                
+                # 處理可選的處理設置
+                processing_settings = config.get('processing_settings', {})
+                if processing_settings:
+                    print("Found processing settings in config:")
+                    
+                    # 更新處理器設置
+                    if 'memory_efficient' in processing_settings:
+                        self.processor.memory_efficient = processing_settings['memory_efficient']
+                        print(f"  Memory efficient: {self.processor.memory_efficient}")
+                    
+                    if 'use_segment_processing' in processing_settings:
+                        self.processor.use_segment_processing = processing_settings['use_segment_processing']
+                        print(f"  Segment processing: {self.processor.use_segment_processing}")
+                    
+                    if 'batch_size' in processing_settings:
+                        self.processor.batch_size = processing_settings['batch_size']
+                        print(f"  Batch size: {self.processor.batch_size}")
+                
                 return config
         except Exception as e:
             print(f"Error loading configuration: {e}")
@@ -1296,6 +1477,38 @@ class ManualVideoInserter:
             print("❌ Error during video processing")
             return input_video_path
     
+    def process_video_with_config(self, input_video_path, output_path, config):
+        """
+        Process all insertions with an existing configuration object
+        
+        Args:
+            input_video_path (str): Path to input video
+            output_path (str): Path for output video
+            config (dict): Configuration data
+        """
+        if not config:
+            print("Error: Invalid configuration")
+            return
+        
+        try:
+            # Process video insertions
+            video_output = self.process_video_inserts(config, input_video_path, output_path)
+            
+            # Process audio insertions
+            audio_inserts = config.get('audio_inserts', [])
+            if audio_inserts:
+                print("🎵 Processing audio insertions...")
+                video_output = self._process_audio_insertions(video_output, audio_inserts)
+                print("✅ Audio processing completed!")
+            
+            print(f"All video insertions completed. Final video: {video_output}")
+            
+        except Exception as e:
+            print(f"Error during processing: {e}")
+        finally:
+            # Clean up temporary files
+            self.cleanup_temp_files()
+    
     def process_insertions(self, config_path, input_video_path, output_path):
         """
         Process all insertions according to configuration file
@@ -1314,17 +1527,12 @@ class ManualVideoInserter:
             # Process video insertions (audio processing removed for PyTorch version)
             video_output = self.process_video_inserts(config, input_video_path, output_path)
             
-            # Note about audio
+            # Process audio insertions
             audio_inserts = config.get('audio_inserts', [])
             if audio_inserts:
-                print("Note: Audio insertion is not supported in PyTorch version.")
-                print("Use FFmpeg separately to add audio:")
-                for audio_insert in audio_inserts:
-                    source = audio_insert.get('source', '')
-                    insert_time = audio_insert.get('time', '00:00.00')
-                    duration = audio_insert.get('duration', '00:05.00')
-                    volume = audio_insert.get('volume', 1.0)
-                    print(f"  ffmpeg -i {output_path} -i {source} -filter_complex \"[1:a]adelay={self.parse_time_to_seconds(insert_time)*1000}|{self.parse_time_to_seconds(insert_time)*1000},volume={volume}[delayed];[0:a][delayed]amix=inputs=2:duration=longest\" -c:v copy output_with_audio.mp4")
+                print("🎵 Processing audio insertions...")
+                video_output = self._process_audio_insertions(video_output, audio_inserts)
+                print("✅ Audio processing completed!")
             
             print(f"All video insertions completed. Final video: {video_output}")
             
@@ -1375,17 +1583,49 @@ def main():
             # Show recommendations mode
             inserter.show_recommendations(args.show_recommendations)
         
-        elif args.config and args.input_video and args.output:
-            # Process insertions using configuration file
+        elif args.config:
+            # Process insertions using configuration file only (self-contained mode)
             if not os.path.exists(args.config):
                 print(f"Error: Configuration file {args.config} not found")
                 return 1
             
-            if not os.path.exists(args.input_video):
-                print(f"Error: Input video {args.input_video} not found")
-                return 1
+            # Load configuration
+            config = inserter.load_config(args.config)
             
-            inserter.process_insertions(args.config, args.input_video, args.output)
+            # Check for self-contained configuration
+            if 'input_video' in config and 'output_video' in config:
+                # Self-contained YAML mode
+                input_video = config['input_video']
+                output_video = config['output_video']
+                
+                if not os.path.exists(input_video):
+                    print(f"Error: Input video {input_video} (from config) not found")
+                    return 1
+                
+                print(f"🎯 Self-contained YAML mode:")
+                print(f"   Input: {input_video}")
+                print(f"   Output: {output_video}")
+                
+                inserter.process_video_with_config(input_video, output_video, config)
+                
+            elif args.input_video and args.output:
+                # Legacy mode with command line input/output
+                if not os.path.exists(args.input_video):
+                    print(f"Error: Input video {args.input_video} not found")
+                    return 1
+                
+                print(f"📋 Legacy YAML mode:")
+                print(f"   Input: {args.input_video}")
+                print(f"   Output: {args.output}")
+                
+                config = inserter.load_config(args.config)
+                inserter.process_video_with_config(args.input_video, args.output, config)
+                
+            else:
+                print("Error: Configuration file must either:")
+                print("  1. Include 'input_video' and 'output_video' fields (self-contained mode), OR")
+                print("  2. Be used with --input-video and --output arguments (legacy mode)")
+                return 1
         
         elif args.input_video and args.output and (args.add_video or args.add_audio):
             # Command line insertion mode
