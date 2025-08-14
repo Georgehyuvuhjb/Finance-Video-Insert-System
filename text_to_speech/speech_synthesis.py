@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 import argparse
 import azure.cognitiveservices.speech as speechsdk
-
+from dotenv import load_dotenv
 
 # --- Configuration ---
 # Default directories for input and output files.
@@ -69,7 +69,7 @@ def word_boundary_cb(evt: speechsdk.SpeechSynthesisWordBoundaryEventArgs):
         })
 
 
-def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR):
+def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR, azure_speech_key: str = None, azure_endpoint: str = None):
     """
     Processes a single text file to generate a WAV audio file and a timestamped text file.
 
@@ -86,8 +86,8 @@ def process_script(input_file_path: Path, output_dir: Path = DEFAULT_OUTPUT_DIR)
     # --- 1. Setup Azure Speech Configuration ---
     try:
         speech_config = speechsdk.SpeechConfig(
-            subscription=os.environ.get('SPEECH_KEY'),
-            endpoint=os.environ.get('ENDPOINT')
+            subscription=azure_speech_key,
+            endpoint=azure_endpoint
         )
     except TypeError:
         print("Error: 'SPEECH_KEY' or 'ENDPOINT' environment variables not set.")
@@ -174,6 +174,7 @@ if __name__ == "__main__":
     print(f"DEBUG: __name__ = {__name__}")
     print(f"DEBUG: sys.argv = {sys.argv}")
 
+    load_dotenv()
     parser = create_parser()
     args = parser.parse_args()
     print(
@@ -195,8 +196,8 @@ if __name__ == "__main__":
         f"DEBUG: Input path is file: {input_path.is_file() if input_path.exists() else 'N/A'}")
 
     # Check for required environment variables
-    speech_key = os.environ.get('SPEECH_KEY')
-    endpoint = os.environ.get('ENDPOINT')
+    speech_key = os.environ.get('AZURE_SPEECH_KEY')
+    endpoint = os.environ.get('AZURE_SPEECH_ENDPOINT')
     print(f"DEBUG: SPEECH_KEY set: {'Yes' if speech_key else 'No'}")
     print(f"DEBUG: ENDPOINT set: {'Yes' if endpoint else 'No'}")
 
@@ -213,7 +214,7 @@ if __name__ == "__main__":
         # Process single file
         print(f"Processing single file: {input_path}")
         try:
-            process_script(input_path, output_dir)
+            process_script(input_path, output_dir, speech_key, endpoint)
         except Exception as e:
             print(f"ERROR processing file: {e}")
             import traceback
@@ -228,7 +229,7 @@ if __name__ == "__main__":
                 f"Processing {len(text_files)} files from directory: {input_path}")
             for txt_file in text_files:
                 try:
-                    process_script(txt_file, output_dir)
+                    process_script(txt_file, output_dir, speech_key, endpoint)
                     time.sleep(1)
                 except Exception as e:
                     print(f"ERROR processing {txt_file}: {e}")

@@ -42,10 +42,9 @@ Examples:
 """
 
 import sys
-import os
 import argparse
-import importlib.util
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 class VideoProductionSystem:
@@ -313,6 +312,7 @@ def create_parser():
 
 def main():
     """Main entry point"""
+    load_dotenv()
     parser = create_parser()
     args = parser.parse_args()
 

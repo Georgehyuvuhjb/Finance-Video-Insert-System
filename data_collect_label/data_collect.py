@@ -5,6 +5,7 @@ import sys
 import argparse
 import requests
 import yaml
+from dotenv import load_dotenv
 
 
 class PixabayVideoDownloader:
@@ -205,26 +206,6 @@ class PixabayVideoDownloader:
             print(f"No new videos found for search term '{self.search_term}'.")
 
 
-def load_config(config_path="config.yaml"):
-    """Load configuration from YAML file"""
-    try:
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as file:
-                config = yaml.safe_load(file)
-                return config
-        else:
-            print(f"Config file not found: {config_path}")
-            config = {"pixabay": {"api_key": "YOUR_API_KEY_HERE"}}
-            with open(config_path, 'w') as file:
-                yaml.dump(config, file, default_flow_style=False)
-            print(f"A template config file has been created at {config_path}")
-            print("Please edit this file to add your Pixabay API key.")
-            sys.exit(1)
-    except Exception as e:
-        print(f"Error loading configuration: {str(e)}")
-        sys.exit(1)
-
-
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -240,9 +221,9 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    load_dotenv()
 
-    config = load_config(args.config)
-    api_key = config.get('pixabay', {}).get('api_key')
+    api_key = os.environ.get('PIXABAY_API_KEY')
 
     if not api_key or api_key == "YOUR_API_KEY_HERE":
         print("Please edit the config.yaml file and add your Pixabay API key.")
