@@ -72,26 +72,38 @@ An automated video production system that can automatically insert relevant vide
 
 **Usage Impact:** All modules now seamlessly work with both old and new JSON formats, ensuring uninterrupted workflows and backward compatibility.
 
-### Manual Video Insert Improvements (Latest - August 2025)
+### Manual Video Insert Improvements with YAML Configuration (Latest - August 2025)
 
-**Issue:** Manual video insertion had several usability and functionality problems.
+**Issue:** Manual video insertion had several usability and functionality problems, plus inflexible configuration management.
 
-**Root Cause:** The manual insertion system had coordinate system inconsistencies, lack of progress feedback, and video encoding issues leading to:
+**Root Cause:** The manual insertion system had coordinate system inconsistencies, lack of progress feedback, video encoding issues, and required repetitive command-line parameters:
 - Position coordinates using top-left corner instead of center point (inconsistent with video-merge)
 - No progress indication during processing, making it unclear if the system was working
 - Static video frames instead of animated clips due to codec issues
 - Poor user experience with long processing times
+- **Configuration inflexibility**: Required `--input-video` parameter even when using YAML configs
+- **Path restrictions**: Unclear whether only specific folders could be used for video sources
 
-**Solution:** Implemented comprehensive manual insertion improvements:
+**Solution:** Implemented comprehensive manual insertion improvements with flexible YAML configuration:
 - **Center-based coordinates**: Position parameters now specify center point, consistent with video-merge module
 - **Progress monitoring**: Real-time progress bars and status updates during video processing
 - **Enhanced video encoding**: Proper codec settings to ensure dynamic video clips instead of static frames
 - **Better error handling**: Improved feedback and debugging information
+- **Self-contained YAML mode**: Configuration files can include input/output paths, eliminating command-line parameters
+- **Path freedom**: Videos can be sourced from any accessible path on the system
+- **Dual usage modes**: Support both legacy command-line style and modern self-contained configurations
 
 **Files Modified:**
-- `manual_insert/manual_inserter.py` - Overhauled coordinate system, added progress monitoring, fixed video encoding
+- `manual_insert/manual_inserter.py` - Overhauled coordinate system, added progress monitoring, fixed video encoding, implemented dual configuration modes
+- `manual_insert/simple_insert_config.yaml` - Self-contained configuration example
+- `manual_insert/complete_config_example.yaml` - Advanced configuration showcase
+- `manual_insert/YAML_MODES_GUIDE.md` - Comprehensive usage documentation
 
-**Usage Impact:** Manual video insertion now provides consistent positioning, clear progress feedback, and properly animated video clips.
+**Usage Impact:** 
+- **Legacy mode**: `python main.py manual-insert -- --config config.yaml --input-video input.mp4 --output output.mp4`
+- **Self-contained mode**: `python main.py manual-insert -- --config self_contained.yaml` (no additional parameters needed)
+- **Path flexibility**: Videos can be sourced from `C:/any/path/video.mp4`, `\\network\share\video.mp4`, or any accessible location
+- **Simplified workflow**: Configuration files contain all necessary information for repeatable processing
 
 ### Small Video Download Fix (Previous - August 2025)
 
@@ -204,8 +216,12 @@ video_code/
 │   ├── video_composer.py     # PyTorch GPU-accelerated composer
 │   └── video_composer2.py    # MoviePy-based simple composer
 ├── manual_insert/           # Manual video/audio insertion module
-│   ├── manual_inserter.py    # Manual insertion control
-│   └── config_example.yaml   # Configuration example
+│   ├── manual_inserter.py    # Manual insertion control (PyTorch-based)
+│   ├── simple_insert_config.yaml        # Basic self-contained configuration
+│   ├── video_insert_example.yaml        # Complex insertion examples
+│   ├── complete_config_example.yaml     # Advanced feature showcase
+│   ├── YAML_MODES_GUIDE.md              # Configuration usage guide
+│   └── YAML_USAGE_GUIDE.md              # Detailed YAML documentation
 └── auto_caption/            # Auto captioning module (under development)
 ```
 │   └── video_composer2.py    # MoviePy-based simple composer
@@ -825,20 +841,141 @@ python main.py auto-caption -- \
 
 ### Step 8: Manual Video and Audio Insertion
 
-Manually insert video clips and audio overlays into your main video using a flexible configuration system. This module provides complete control over when, where, and how media is inserted, with support for multiple simultaneous insertions.
+Manually insert video clips and audio overlays into your main video using a flexible configuration system. This module provides complete control over when, where, and how media is inserted, with support for multiple simultaneous insertions and two usage modes.
 
-#### 8.1 Display Recommendations
+#### 8.1 Quick Start: Self-Contained YAML Mode (Recommended)
 
-First, generate enhanced recommendations with timing information from your matched data:
+Create a configuration file that includes everything:
+
+```yaml
+# my_config.yaml
+input_video: "outputs/final.mp4"
+output_video: "outputs/result.mp4"
+
+video_inserts:
+  - time: "00:05.00"
+    videos:
+      - source: "C:/any/path/overlay.mp4"  # Any accessible path!
+        start: "00:00.00"
+        duration: "00:03.00"
+        position: "top-right"
+        size: "25%"
+        loop: false
+```
+
+Execute with a single command:
+```bash
+# Only configuration file needed - no other parameters!
+python main.py manual-insert -- --config my_config.yaml
+```
+
+#### 8.2 Alternative: Legacy Mode with Command Line Parameters
+
+For backward compatibility or quick single insertions:
 
 ```bash
-# Generate recommendations with timing data
-python main.py data-match -- \
-    --file outputs/tts/script/script.txt \
-    --show-recommendations \
-    --output outputs/data_match/matches_with_timing.txt
+# Legacy mode - requires input/output parameters
+python main.py manual-insert -- \
+    --config legacy_config.yaml \
+    --input-video input.mp4 \
+    --output output.mp4
 
-# Display existing recommendations in Chinese format
+# Direct command line insertion (no config file)
+python main.py manual-insert -- \
+    --input-video input.mp4 \
+    --output output.mp4 \
+    --add-video overlay.mp4 \
+    --insert-time "00:05.00" \
+    --position "top-right" \
+    --size "25%"
+```
+
+#### 8.3 Path Flexibility
+
+Videos can be sourced from anywhere on your system:
+
+```yaml
+video_inserts:
+  - time: "00:10.00"
+    videos:
+      - source: "C:/Videos/chart.mp4"              # Windows absolute path
+      - source: "D:/Media/finance_data.mp4"        # Different drive
+      - source: "\\server\share\content.mp4"       # Network path
+      - source: "../downloads/clip.mp4"            # Relative path
+      - source: "outputs/videos/local.mp4"         # Project relative
+```
+
+**No restrictions on folder locations!**
+
+#### 8.4 Configuration Examples
+
+**Basic Single Insertion:**
+```yaml
+input_video: "main_video.mp4"
+output_video: "result.mp4"
+
+video_inserts:
+  - time: "00:10.00"
+    videos:
+      - source: "/path/to/overlay.mp4"
+        start: "00:02.00"
+        duration: "00:05.00"
+        position: "center"
+        size: "40%"
+        loop: false
+```
+
+**Multiple Simultaneous Insertions:**
+```yaml
+input_video: "presentation.mp4"
+output_video: "enhanced_presentation.mp4"
+
+video_inserts:
+  - time: "00:15.00"
+    videos:
+      - source: "chart1.mp4"
+        position: "top-left"
+        size: "30%"
+        duration: "00:05.00"
+      
+      - source: "chart2.mp4" 
+        position: "top-right"
+        size: "30%"
+        duration: "00:05.00"
+      
+      - source: "logo.mp4"
+        position: "bottom-right"
+        size: "15%"
+        duration: "00:10.00"
+```
+
+**Audio and Video Combined:**
+```yaml
+input_video: "base_video.mp4"
+output_video: "final_video.mp4"
+
+video_inserts:
+  - time: "00:05.00"
+    videos:
+      - source: "overlay.mp4"
+        position: "top-right"
+        size: "25%"
+        duration: "00:03.00"
+
+audio_inserts:
+  - time: "00:00.00"
+    source: "background_music.mp3"
+    duration: "00:30.00"
+    volume: 0.3
+    mix_mode: "overlay"
+```
+
+#### 8.5 Display Recommendations
+
+Generate timing recommendations from matched data:
+
+```bash
+# Show existing recommendations in readable format
 python main.py manual-insert -- --show-recommendations outputs/data_match/matches.json
 ```
 
@@ -848,18 +985,10 @@ python main.py manual-insert -- --show-recommendations outputs/data_match/matche
 ================
 
 句子群組 1 (時間: 00:00.05 - 00:10.68, 時長: 00:10.63):
-句子內容:
-- 你好, 我係Christina，我哋依家一齊嚟睇下2025年7月28日至2025年8月1日嘅美國股市市場分析同預測。
-- 美股近期表現強勁，標普500同納指屢創歷史新高。
-
 推薦影片:
 1. 172888_finance_large.mp4 (distance: 0.1521)
    標籤: finance, stock market, analysis
 ```
-
-#### 8.2 Create Configuration File
-
-Create a YAML configuration file to define your manual insertions:
 
 ```yaml
 # manual_insert_config.yaml
@@ -1049,14 +1178,14 @@ python main.py manual-insert -- \
     --temp-dir /tmp/manual_insert
 ```
 
-#### 8.5 Configuration Options
+#### 8.6 Position and Size Specifications
 
-**Position Specifications:**
+**Position Specifications (Center-based coordinates):**
 - **Presets**: `"top-left"`, `"top-center"`, `"top-right"`, `"center-left"`, `"center"`, `"center-right"`, `"bottom-left"`, `"bottom-center"`, `"bottom-right"`
-- **Percentage (center-based)**: `"50%,25%"` (50% from left edge, 25% from top edge - specifies center point)
-- **Pixels (center-based)**: `"100,50"` (center point at 100px from left, 50px from top)
+- **Percentage**: `"50%,25%"` (50% from left edge, 25% from top edge - center point of video)
+- **Pixels**: `"100,50"` (center point at 100px from left, 50px from top)
 
-**Important:** Position coordinates specify the CENTER POINT of the inserted video, not the top-left corner. This is consistent with the video-merge module behavior.
+**Important:** Position coordinates specify the CENTER POINT of the inserted video, consistent with the video-merge module.
 
 **Size Specifications:**
 - **Percentage**: `"25%"` (25% of main video width, maintains aspect ratio)
@@ -1068,252 +1197,74 @@ python main.py manual-insert -- \
 - **HH:MM:SS.ms**: `"01:23:45.67"` (1 hour, 23 minutes, 45.67 seconds)
 - **Seconds**: `"83.45"` (83.45 seconds)
 
-**Audio Mix Modes:**
-- **`"overlay"`**: Mix with original audio (default)
-- **`"replace"`**: Replace original audio during the specified time period
+#### 8.7 Usage Mode Comparison
 
-#### 8.6 Advanced Usage Examples
+| Feature | Self-Contained YAML | Legacy Mode | Command Line |
+|---------|-------------------|-------------|--------------|
+| **Setup Complexity** | ⭐⭐⭐⭐⭐ Simple | ⭐⭐⭐ Moderate | ⭐⭐ Complex |
+| **Parameter Count** | 1 (config file) | 3+ parameters | 5+ parameters |
+| **Multiple Insertions** | ✅ Excellent | ✅ Good | ❌ Difficult |
+| **Reusability** | ✅ High | ✅ Medium | ❌ Low |
+| **Version Control** | ✅ Easy | ✅ Medium | ❌ Hard |
+| **Path Flexibility** | ✅ Any path | ✅ Any path | ✅ Any path |
 
-**Multiple Videos at Different Positions (Configuration File):**
+**Recommended Workflows:**
+
+*Quick Testing:*
+```bash
+# Command line for single insertions
+python main.py manual-insert -- --input-video test.mp4 --output result.mp4 --add-video overlay.mp4 --insert-time "00:05.00"
+```
+
+*Production Work:*
+```yaml
+# Self-contained YAML for complex projects
+input_video: "production/main.mp4"
+output_video: "production/final.mp4"
+video_inserts: [...]
+audio_inserts: [...]
+```
+
+#### 8.8 Advanced Configuration Features
+
+**Processing Settings:**
+```yaml
+input_video: "large_video.mp4"
+output_video: "processed.mp4"
+
+# Performance optimization
+processing_settings:
+  memory_efficient: true
+  use_segment_processing: true  # Only processes modified segments
+  batch_size: 5                 # Smaller for 4K videos
+  use_gpu: true
+
+video_inserts: [...]
+```
+
+**Loop Behavior:**
 ```yaml
 video_inserts:
-  - time: "00:10.00"
+  - time: "00:30.00"
     videos:
-      - source: "chart1.mp4"
-        start: "00:00.00"
-        duration: "00:05.00"
-        position: "top-left"
-        size: "30%"
-        loop: true
-      - source: "chart2.mp4"
-        start: "00:00.00"
-        duration: "00:05.00"
-        position: "top-right"
-        size: "30%"
-        loop: true
-      - source: "logo.mp4"
-        start: "00:00.00"
-        duration: "00:05.00"
-        position: "bottom-right"
-        size: "15%"
-        loop: false
-```
-
-**Sequential Command Line Insertions:**
-```bash
-# First insertion - add chart at 5 seconds
-python main.py manual-insert -- \
-    --input-video main_video.mp4 \
-    --output temp_video1.mp4 \
-    --add-video chart.mp4 \
-    --insert-time "00:05.00" \
-    --position "top-left" \
-    --size "30%"
-
-# Second insertion - add logo to the result
-python main.py manual-insert -- \
-    --input-video temp_video1.mp4 \
-    --output temp_video2.mp4 \
-    --add-video logo.mp4 \
-    --insert-time "00:10.00" \
-    --position "bottom-right" \
-    --size "15%"
-
-# Third insertion - add background music
-python main.py manual-insert -- \
-    --input-video temp_video2.mp4 \
-    --output final_video.mp4 \
-    --add-audio background.mp3 \
-    --audio-time "00:00.00" \
-    --audio-duration "00:30.00" \
-    --volume 0.3
-```
-
-**Audio-Only Configuration:**
-```yaml
-# No video insertions, only audio
-audio_inserts:
-  - time: "00:00.00"
-    source: "intro_music.mp3"
-    start: "00:00.00"
-    duration: "00:05.00"
-    volume: 0.4
-    mix_mode: "overlay"
-  - time: "01:30.00"
-    source: "outro_music.mp3"
-    start: "00:00.00"
-    duration: "00:08.00"
-    volume: 0.3
-    mix_mode: "overlay"
-```
-
-**Command Line Audio-Only Example:**
-```bash
-# Add intro music
-python main.py manual-insert -- \
-    --input-video main_video.mp4 \
-    --output result_with_intro.mp4 \
-    --add-audio intro_music.mp3 \
-    --audio-time "00:00.00" \
-    --audio-duration "00:05.00" \
-    --volume 0.4
-
-# Add outro music to the result (sequential processing)
-python main.py manual-insert -- \
-    --input-video result_with_intro.mp4 \
-    --output final_result.mp4 \
-    --add-audio outro_music.mp3 \
-    --audio-time "01:30.00" \
-    --audio-duration "00:08.00" \
-    --volume 0.3
-```
-
-**Video-Only Configuration:**
-```yaml
-# No audio insertions, only video
-video_inserts:
-  - time: "00:05.00"
-    videos:
-      - source: "data_visualization.mp4"
-        start: "00:00.00"
-        duration: "00:10.00"
+      - source: "short_clip.mp4"    # 2-second clip
+        duration: "00:06.00"        # Want 6 seconds
+        loop: true                  # Will repeat 3 times
         position: "center"
-        size: "50%"
-        loop: false
-```
-
-**Command Line vs Configuration File Comparison:**
-
-*For single insertions:* Command line is faster and more direct
-```bash
-# Quick single insertion
-python main.py manual-insert -- --input-video main.mp4 --output result.mp4 --add-video overlay.mp4 --insert-time "00:05.00"
-```
-
-*For multiple insertions:* Configuration file is more organized
-```yaml
-# Complex multi-insertion setup
-video_inserts:
-  - time: "00:05.00"
-    videos: [...]
-  - time: "00:15.00"
-    videos: [...]
-audio_inserts:
-  - time: "00:00.00"
-    source: "background.mp3"
-    # ... more parameters
-```
-
-#### 8.7 Performance and Quality Tips
-
-**For High-Quality Output:**
-- Use high-resolution source videos
-- Ensure source videos have consistent frame rates
-- Use lossless audio formats when possible
-
-**For Better Performance:**
-- Keep video clips reasonably short (under 30 seconds)
-- Use MP4 format for video sources
-- Use WAV or MP3 format for audio sources
-- Specify a fast SSD for temporary directory
-
-**Command Line Best Practices:**
-- Use sequential insertions for multiple modifications to avoid complex temporary configurations
-- Test with shorter clips first to verify positioning and timing
-- Use absolute paths for source files to avoid path resolution issues
-- Specify custom temp directory on fastest available drive for large videos
-
-**Configuration File vs Command Line:**
-- **Use command line for**: Quick single insertions, testing, iterative adjustments
-- **Use configuration file for**: Complex multi-insertion projects, batch processing, repeatable workflows
-
-**Memory Management:**
-- The system automatically handles temporary files
-- Large videos may require substantial disk space
-- Monitor disk usage during processing
-
-**Examples of Efficient Workflows:**
-
-*Testing Workflow (Command Line):*
-```bash
-# Quick test with short duration
-python main.py manual-insert -- \
-    --input-video test_video.mp4 \
-    --output test_result.mp4 \
-    --add-video overlay.mp4 \
-    --insert-time "00:05.00" \
-    --clip-duration "00:01.00" \
-    --size "20%"
-
-# Adjust and re-test
-python main.py manual-insert -- \
-    --input-video test_video.mp4 \
-    --output test_result2.mp4 \
-    --add-video overlay.mp4 \
-    --insert-time "00:05.00" \
-    --clip-duration "00:03.00" \
-    --size "30%" \
-    --position "top-left"
-```
-
-*Production Workflow (Configuration File):*
-```bash
-# Use comprehensive YAML configuration for final production
-python main.py manual-insert -- \
-    --config production_config.yaml \
-    --input-video main_video.mp4 \
-    --output final_production.mp4 \
-    --temp-dir /fast_ssd/temp
+        size: "40%"
 ```
 
 **Prerequisites:**
 - **Main video file** (MP4 format recommended)
 - **Source video/audio files** for insertion
-- **FFmpeg** with video and audio support
-- **YAML configuration file** defining insertions
+- **YAML configuration file** (for self-contained mode) or command-line parameters
 - **Sufficient disk space** for temporary files
 
 **Output:**
 - **Final composed video** with all specified insertions
 - **Automatic cleanup** of temporary files
-- **Preservation** of original video quality where possible
-
-**Common Use Cases:**
-
-1. **Financial Reports**: 
-   - *Configuration*: Insert charts, graphs, and market data visualizations
-   - *Command Line*: Quick chart overlay during market updates
-   ```bash
-   python main.py manual-insert -- --input-video market_report.mp4 --output updated_report.mp4 --add-video live_chart.mp4 --insert-time "00:30.00"
-   ```
-
-2. **Educational Content**: 
-   - *Configuration*: Add supplementary videos and background music
-   - *Command Line*: Insert explanation diagrams or background audio
-   ```bash
-   python main.py manual-insert -- --input-video lecture.mp4 --output enhanced_lecture.mp4 --add-video diagram.mp4 --insert-time "00:45.00" --position "top-right"
-   ```
-
-3. **Presentations**: 
-   - *Configuration*: Overlay logos, watermarks, and supporting media
-   - *Command Line*: Quick logo or watermark addition
-   ```bash
-   python main.py manual-insert -- --input-video presentation.mp4 --output branded_presentation.mp4 --add-video logo.mp4 --insert-time "00:00.00" --size "15%" --position "bottom-right"
-   ```
-
-4. **News Content**: 
-   - *Configuration*: Insert relevant footage and audio commentary
-   - *Command Line*: Add breaking news footage or live updates
-   ```bash
-   python main.py manual-insert -- --input-video news_base.mp4 --output breaking_news.mp4 --add-video footage.mp4 --insert-time "01:30.00" --add-audio commentary.mp3 --audio-time "01:30.00"
-   ```
-
-5. **Marketing Videos**: 
-   - *Configuration*: Add product demonstrations and background audio
-   - *Command Line*: Quick product showcase insertion
-   ```bash
-   python main.py manual-insert -- --input-video marketing_base.mp4 --output product_showcase.mp4 --add-video product_demo.mp4 --insert-time "00:15.00" --size "40%"
-   ```
+- **Preservation** of original video quality
+- **Audio preservation** with automatic fallback systems
 
 
 ## Configuration Files
@@ -1401,7 +1352,37 @@ python main.py data-match -- --text "your text" --similarity-threshold 0.4
 - `--distance-threshold 1.0-1.5`: High-quality matches only
 - `--distance-threshold 2.0-3.0`: More permissive matching
 
-#### 1. Manual Video Insertion Issues (Latest Updates)
+#### 1. Manual Video Insertion Configuration Issues (Latest Updates)
+
+**Symptoms:**
+- Confusion about requiring `--input-video` parameter with YAML configurations
+- Uncertainty about path restrictions for video sources
+- Repetitive command-line parameter entry for complex projects
+
+**Solutions:**
+```bash
+# Use self-contained YAML mode (recommended)
+python main.py manual-insert -- --config my_config.yaml
+# No additional parameters needed!
+
+# YAML configuration includes everything:
+input_video: "path/to/input.mp4"
+output_video: "path/to/output.mp4"
+video_inserts: [...]
+
+# Videos can be sourced from ANY accessible path:
+# - C:/Videos/clip.mp4
+# - \\server\share\video.mp4  
+# - ../downloads/media.mp4
+# - /home/user/clips/video.mp4
+```
+
+**Configuration Modes:**
+- **Self-contained YAML**: Configuration file contains input/output paths
+- **Legacy mode**: Configuration + command-line parameters (backward compatible)
+- **Command-line only**: Direct parameters without configuration file
+
+#### 2. Manual Video Insertion Position and Progress Issues
 
 **Symptoms:**
 - Position coordinates behaving differently from video-merge module
@@ -1411,7 +1392,7 @@ python main.py data-match -- --text "your text" --similarity-threshold 0.4
 
 **Solutions:**
 ```bash
-# All position coordinates now use center-based positioning
+# All position coordinates now use center-based positioning (consistent with video-merge)
 python main.py manual-insert -- \
     --input-video main.mp4 \
     --output result.mp4 \
@@ -1421,23 +1402,12 @@ python main.py manual-insert -- \
 
 # Progress monitoring is now automatic during processing
 # Look for real-time progress updates like:
-# "Preparing clip: 00:01.23"
-# "Progress: 00:02.45"
-# "Video insertion completed successfully!"
+# "🎯 Self-contained YAML mode: Input: ..., Output: ..."
+# "Processing video insertions..."
+# "Audio preservation: Using FFmpeg method"
 ```
 
-**Position Coordinate System:**
-- `"50%,50%"`: Center of screen (center point of inserted video)
-- `"75%,25%"`: Upper right area (center point of inserted video)
-- `"25%,75%"`: Lower left area (center point of inserted video)
-
-**Progress Monitoring Features:**
-- Real-time clip preparation progress
-- Video insertion progress with timestamps
-- Clear completion status messages
-- Error reporting with specific details
-
-#### 2. Module Not Found Errors
+#### 3. Module Not Found Errors
 ```bash
 # Ensure you're in the correct directory
 cd /path/to/work_code
@@ -1449,7 +1419,7 @@ python -c "import sys; print(sys.path)"
 pip install -r requirements.txt
 ```
 
-#### 2. Azure Speech Service Errors
+#### 4. Azure Speech Service Errors
 ```bash
 # Verify environment variables
 echo $SPEECH_KEY
@@ -1464,7 +1434,7 @@ python -c "import azure.cognitiveservices.speech as speechsdk; print('Azure SDK 
 - `403 Forbidden`: Invalid ENDPOINT or region mismatch
 - `429 Too Many Requests`: API quota exceeded
 
-#### 3. Pixabay Download Failures
+#### 5. Pixabay Download Failures
 ```bash
 # Verify API key in config.yaml
 python config.py verify
@@ -1489,7 +1459,7 @@ curl -I https://pixabay.com/api/videos/
 python main.py data-collect university 3  # Downloads 3, you can delete extras
 ```
 
-#### 4. Video Processing Memory Issues
+#### 6. Video Processing Memory Issues
 
 **Symptoms:**
 - "CUDA out of memory" errors
@@ -1515,7 +1485,7 @@ python main.py data-label -- --smaller_model
 - Process videos in smaller batches
 - Use lower resolution source videos
 
-#### 5. GPU Memory Insufficient
+#### 7. GPU Memory Insufficient
 
 **Check GPU memory:**
 ```bash
@@ -1534,7 +1504,7 @@ python main.py video-merge -- [...] --cpu
 python main.py data-label -- --smaller_model --device cpu
 ```
 
-#### 6. Model Download Issues
+#### 8. Model Download Issues
 
 **Symptoms:**
 - "Connection timeout" during model loading
