@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Video/Audio files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.flac
+
+# Output and temporary files
+outputs/
+inputs/
+output/
+input/
+temp/
+tmp/
+*.tmp
+*.log
+*.bak
+
+# Large model files
+*.pkl
+*.h5
+*.model
+*.weights
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
